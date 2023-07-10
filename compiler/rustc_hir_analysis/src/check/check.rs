@@ -308,9 +308,9 @@ pub(super) fn check_opaque_for_inheriting_lifetimes(
     {
         let substs = InternalSubsts::identity_for_item(tcx, def_id);
         let opaque_identity_ty = if in_trait && !tcx.lower_impl_trait_in_trait_to_assoc_ty() {
-            tcx.mk_projection(def_id.to_def_id(), substs)
+            Ty::new_projection(tcx, def_id.to_def_id(), substs)
         } else {
-            tcx.mk_opaque(def_id.to_def_id(), substs)
+            Ty::new_opaque(tcx, def_id.to_def_id(), substs)
         };
         let mut visitor = ProhibitOpaqueVisitor {
             opaque_identity_ty,
@@ -410,7 +410,7 @@ fn check_opaque_meets_bounds<'tcx>(
     let ocx = ObligationCtxt::new(&infcx);
 
     let substs = InternalSubsts::identity_for_item(tcx, def_id.to_def_id());
-    let opaque_ty = tcx.mk_opaque(def_id.to_def_id(), substs);
+    let opaque_ty = Ty::new_opaque(tcx, def_id.to_def_id(), substs);
 
     // `ReErased` regions appear in the "parent_substs" of closures/generators.
     // We're ignoring them here and replacing them with fresh region variables.
@@ -722,7 +722,14 @@ pub(super) fn check_specialization_validity<'tcx>(
     let result = opt_result.unwrap_or(Ok(()));
 
     if let Err(parent_impl) = result {
-        report_forbidden_specialization(tcx, impl_item, parent_impl);
+        if !tcx.is_impl_trait_in_trait(impl_item) {
+            report_forbidden_specialization(tcx, impl_item, parent_impl);
+        } else {
+            tcx.sess.delay_span_bug(
+                DUMMY_SP,
+                format!("parent item: {:?} not marked as default", parent_impl),
+            );
+        }
     }
 }
 
@@ -1485,7 +1492,9 @@ fn opaque_type_cycle_error(
                 }
 
                 for closure_def_id in visitor.closures {
-                    let Some(closure_local_did) = closure_def_id.as_local() else { continue; };
+                    let Some(closure_local_did) = closure_def_id.as_local() else {
+                        continue;
+                    };
                     let typeck_results = tcx.typeck(closure_local_did);
 
                     let mut label_match = |ty: Ty<'_>, span| {

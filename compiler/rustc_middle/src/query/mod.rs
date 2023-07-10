@@ -1087,11 +1087,13 @@ rustc_queries! {
     }
 
     /// Tries to destructure an `mir::ConstantKind` ADT or array into its variant index
-    /// and its field values.
-    query try_destructure_mir_constant(
-        key: ty::ParamEnvAnd<'tcx, mir::ConstantKind<'tcx>>
+    /// and its field values. This should only be used for pretty printing.
+    query try_destructure_mir_constant_for_diagnostics(
+        key: (ConstValue<'tcx>, Ty<'tcx>)
     ) -> Option<mir::DestructuredConstant<'tcx>> {
         desc { "destructuring MIR constant"}
+        no_hash
+        eval_always
     }
 
     query const_caller_location(key: (rustc_span::Symbol, u32, u32)) -> ConstValue<'tcx> {
@@ -1276,7 +1278,7 @@ rustc_queries! {
     }
 
     query codegen_select_candidate(
-        key: (ty::ParamEnv<'tcx>, ty::PolyTraitRef<'tcx>)
+        key: (ty::ParamEnv<'tcx>, ty::TraitRef<'tcx>)
     ) -> Result<&'tcx ImplSource<'tcx, ()>, CodegenObligationError> {
         cache_on_disk_if { true }
         desc { |tcx| "computing candidate for `{}`", key.1 }

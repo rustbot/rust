@@ -241,7 +241,6 @@
 #![feature(allocator_internals)]
 #![feature(allow_internal_unsafe)]
 #![feature(allow_internal_unstable)]
-#![feature(c_str_literals)]
 #![feature(c_unwind)]
 #![feature(cfg_target_thread_local)]
 #![feature(concat_idents)]
@@ -604,7 +603,6 @@ pub mod alloc;
 
 // Private support modules
 mod panicking;
-mod personality;
 
 #[path = "../../backtrace/src/lib.rs"]
 #[allow(dead_code, unused_attributes, fuzzy_provenance_casts)]

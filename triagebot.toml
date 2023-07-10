@@ -20,6 +20,7 @@ allow-unauthenticated = [
     "regression-*",
     "perf-*",
     "AsyncAwait-OnDeck",
+    "needs-triage",
 ]
 
 [glacier]
@@ -253,6 +254,12 @@ trigger_files = [
 
 [autolabel."S-waiting-on-review"]
 new_pr = true
+
+[autolabel."needs-triage"]
+new_issue = true
+exclude_labels = [
+    "C-tracking-issue"
+]
 
 [autolabel."WG-trait-system-refactor"]
 trigger_files = [

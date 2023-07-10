@@ -95,7 +95,7 @@ fn defaultness(tcx: TyCtxt<'_>, def_id: LocalDefId) -> hir::Defaultness {
 fn adt_sized_constraint(tcx: TyCtxt<'_>, def_id: DefId) -> &[Ty<'_>] {
     if let Some(def_id) = def_id.as_local() {
         if matches!(tcx.representability(def_id), ty::Representability::Infinite) {
-            return tcx.mk_type_list(&[tcx.ty_error_misc()]);
+            return tcx.mk_type_list(&[Ty::new_misc_error(tcx)]);
         }
     }
     let def = tcx.adt_def(def_id);
@@ -103,7 +103,7 @@ fn adt_sized_constraint(tcx: TyCtxt<'_>, def_id: DefId) -> &[Ty<'_>] {
     let result = tcx.mk_type_list_from_iter(
         def.variants()
             .iter()
-            .filter_map(|v| v.fields.raw.last())
+            .filter_map(|v| v.tail_opt())
             .flat_map(|f| sized_constraint_for_ty(tcx, def, tcx.type_of(f.did).subst_identity())),
     );
 
@@ -285,7 +285,7 @@ impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for ImplTraitInTraitFinder<'_, 'tcx> {
             let default_ty = if self.tcx.lower_impl_trait_in_trait_to_assoc_ty() {
                 self.tcx.type_of(shifted_alias_ty.def_id).subst(self.tcx, shifted_alias_ty.substs)
             } else {
-                self.tcx.mk_alias(ty::Opaque, shifted_alias_ty)
+                Ty::new_alias(self.tcx,ty::Opaque, shifted_alias_ty)
             };
 
             self.predicates.push(
