@@ -7,11 +7,13 @@
 //!
 //! For now, we are developing everything inside `rustc`, thus, we keep this module private.
 
-use crate::stable_mir::ty::{FloatTy, IntTy, RigidTy, TyKind, UintTy};
+use crate::rustc_internal::{self, opaque};
+use crate::stable_mir::ty::{AdtSubsts, FloatTy, GenericArgKind, IntTy, RigidTy, TyKind, UintTy};
 use crate::stable_mir::{self, Context};
 use rustc_middle::mir;
 use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_span::def_id::{CrateNum, DefId, LOCAL_CRATE};
+use rustc_target::abi::FieldIdx;
 use tracing::debug;
 
 impl<'tcx> Context for Tables<'tcx> {
@@ -92,21 +94,38 @@ impl<'tcx> Tables<'tcx> {
                 ty::FloatTy::F32 => TyKind::RigidTy(RigidTy::Float(FloatTy::F32)),
                 ty::FloatTy::F64 => TyKind::RigidTy(RigidTy::Float(FloatTy::F64)),
             },
-            ty::Adt(_, _) => todo!(),
+            ty::Adt(adt_def, substs) => TyKind::RigidTy(RigidTy::Adt(
+                rustc_internal::adt_def(adt_def.did()),
+                AdtSubsts(
+                    substs
+                        .iter()
+                        .map(|arg| match arg.unpack() {
+                            ty::GenericArgKind::Lifetime(region) => {
+                                GenericArgKind::Lifetime(opaque(&region))
+                            }
+                            ty::GenericArgKind::Type(ty) => {
+                                GenericArgKind::Type(self.intern_ty(ty))
+                            }
+                            ty::GenericArgKind::Const(const_) => {
+                                GenericArgKind::Const(opaque(&const_))
+                            }
+                        })
+                        .collect(),
+                ),
+            )),
             ty::Foreign(_) => todo!(),
-            ty::Str => todo!(),
-            ty::Array(_, _) => todo!(),
-            ty::Slice(_) => todo!(),
+            ty::Str => TyKind::RigidTy(RigidTy::Str),
+            ty::Array(ty, constant) => {
+                TyKind::RigidTy(RigidTy::Array(self.intern_ty(*ty), opaque(constant)))
+            }
+            ty::Slice(ty) => TyKind::RigidTy(RigidTy::Slice(self.intern_ty(*ty))),
             ty::RawPtr(_) => todo!(),
             ty::Ref(_, _, _) => todo!(),
             ty::FnDef(_, _) => todo!(),
             ty::FnPtr(_) => todo!(),
-            ty::Placeholder(..) => todo!(),
             ty::Dynamic(_, _, _) => todo!(),
             ty::Closure(_, _) => todo!(),
             ty::Generator(_, _, _) => todo!(),
-            ty::GeneratorWitness(_) => todo!(),
-            ty::GeneratorWitnessMIR(_, _) => todo!(),
             ty::Never => todo!(),
             ty::Tuple(fields) => TyKind::RigidTy(RigidTy::Tuple(
                 fields.iter().map(|ty| self.intern_ty(ty)).collect(),
@@ -114,8 +133,13 @@ impl<'tcx> Tables<'tcx> {
             ty::Alias(_, _) => todo!(),
             ty::Param(_) => todo!(),
             ty::Bound(_, _) => todo!(),
-            ty::Infer(_) => todo!(),
-            ty::Error(_) => todo!(),
+            ty::Placeholder(..)
+            | ty::GeneratorWitness(_)
+            | ty::GeneratorWitnessMIR(_, _)
+            | ty::Infer(_)
+            | ty::Error(_) => {
+                unreachable!();
+            }
         }
     }
 
@@ -137,8 +161,11 @@ fn smir_crate(tcx: TyCtxt<'_>, crate_num: CrateNum) -> stable_mir::Crate {
     stable_mir::Crate { id: crate_num.into(), name: crate_name, is_local }
 }
 
-pub trait Stable {
+/// Trait used to convert between an internal MIR type to a Stable MIR type.
+pub(crate) trait Stable {
+    /// The stable representation of the type implementing Stable.
     type T;
+    /// Converts an object to the equivalent Stable MIR representation.
     fn stable(&self) -> Self::T;
 }
 
@@ -173,12 +200,20 @@ impl<'tcx> Stable for mir::Rvalue<'tcx> {
         match self {
             Use(op) => stable_mir::mir::Rvalue::Use(op.stable()),
             Repeat(_, _) => todo!(),
-            Ref(_, _, _) => todo!(),
-            ThreadLocalRef(_) => todo!(),
-            AddressOf(_, _) => todo!(),
-            Len(_) => todo!(),
+            Ref(region, kind, place) => {
+                stable_mir::mir::Rvalue::Ref(opaque(region), kind.stable(), place.stable())
+            }
+            ThreadLocalRef(def_id) => {
+                stable_mir::mir::Rvalue::ThreadLocalRef(rustc_internal::crate_item(*def_id))
+            }
+            AddressOf(mutability, place) => {
+                stable_mir::mir::Rvalue::AddressOf(mutability.stable(), place.stable())
+            }
+            Len(place) => stable_mir::mir::Rvalue::Len(place.stable()),
             Cast(_, _, _) => todo!(),
-            BinaryOp(_, _) => todo!(),
+            BinaryOp(bin_op, ops) => {
+                stable_mir::mir::Rvalue::BinaryOp(bin_op.stable(), ops.0.stable(), ops.1.stable())
+            }
             CheckedBinaryOp(bin_op, ops) => stable_mir::mir::Rvalue::CheckedBinaryOp(
                 bin_op.stable(),
                 ops.0.stable(),
@@ -186,11 +221,116 @@ impl<'tcx> Stable for mir::Rvalue<'tcx> {
             ),
             NullaryOp(_, _) => todo!(),
             UnaryOp(un_op, op) => stable_mir::mir::Rvalue::UnaryOp(un_op.stable(), op.stable()),
-            Discriminant(_) => todo!(),
+            Discriminant(place) => stable_mir::mir::Rvalue::Discriminant(place.stable()),
             Aggregate(_, _) => todo!(),
             ShallowInitBox(_, _) => todo!(),
-            CopyForDeref(_) => todo!(),
+            CopyForDeref(place) => stable_mir::mir::Rvalue::CopyForDeref(place.stable()),
         }
+    }
+}
+
+impl Stable for mir::Mutability {
+    type T = stable_mir::mir::Mutability;
+    fn stable(&self) -> Self::T {
+        use mir::Mutability::*;
+        match *self {
+            Not => stable_mir::mir::Mutability::Not,
+            Mut => stable_mir::mir::Mutability::Mut,
+        }
+    }
+}
+
+impl Stable for mir::BorrowKind {
+    type T = stable_mir::mir::BorrowKind;
+    fn stable(&self) -> Self::T {
+        use mir::BorrowKind::*;
+        match *self {
+            Shared => stable_mir::mir::BorrowKind::Shared,
+            Shallow => stable_mir::mir::BorrowKind::Shallow,
+            Mut { kind } => stable_mir::mir::BorrowKind::Mut { kind: kind.stable() },
+        }
+    }
+}
+
+impl Stable for mir::MutBorrowKind {
+    type T = stable_mir::mir::MutBorrowKind;
+    fn stable(&self) -> Self::T {
+        use mir::MutBorrowKind::*;
+        match *self {
+            Default => stable_mir::mir::MutBorrowKind::Default,
+            TwoPhaseBorrow => stable_mir::mir::MutBorrowKind::TwoPhaseBorrow,
+            ClosureCapture => stable_mir::mir::MutBorrowKind::ClosureCapture,
+        }
+    }
+}
+
+impl<'tcx> Stable for mir::NullOp<'tcx> {
+    type T = stable_mir::mir::NullOp;
+    fn stable(&self) -> Self::T {
+        use mir::NullOp::*;
+        match self {
+            SizeOf => stable_mir::mir::NullOp::SizeOf,
+            AlignOf => stable_mir::mir::NullOp::AlignOf,
+            OffsetOf(indices) => {
+                stable_mir::mir::NullOp::OffsetOf(indices.iter().map(|idx| idx.stable()).collect())
+            }
+        }
+    }
+}
+
+impl Stable for mir::CastKind {
+    type T = stable_mir::mir::CastKind;
+    fn stable(&self) -> Self::T {
+        use mir::CastKind::*;
+        match self {
+            PointerExposeAddress => stable_mir::mir::CastKind::PointerExposeAddress,
+            PointerFromExposedAddress => stable_mir::mir::CastKind::PointerFromExposedAddress,
+            PointerCoercion(c) => stable_mir::mir::CastKind::PointerCoercion(c.stable()),
+            DynStar => stable_mir::mir::CastKind::DynStar,
+            IntToInt => stable_mir::mir::CastKind::IntToInt,
+            FloatToInt => stable_mir::mir::CastKind::FloatToInt,
+            FloatToFloat => stable_mir::mir::CastKind::FloatToFloat,
+            IntToFloat => stable_mir::mir::CastKind::IntToFloat,
+            PtrToPtr => stable_mir::mir::CastKind::PtrToPtr,
+            FnPtrToPtr => stable_mir::mir::CastKind::FnPtrToPtr,
+            Transmute => stable_mir::mir::CastKind::Transmute,
+        }
+    }
+}
+
+impl Stable for ty::adjustment::PointerCoercion {
+    type T = stable_mir::mir::PointerCoercion;
+    fn stable(&self) -> Self::T {
+        use ty::adjustment::PointerCoercion;
+        match self {
+            PointerCoercion::ReifyFnPointer => stable_mir::mir::PointerCoercion::ReifyFnPointer,
+            PointerCoercion::UnsafeFnPointer => stable_mir::mir::PointerCoercion::UnsafeFnPointer,
+            PointerCoercion::ClosureFnPointer(unsafety) => {
+                stable_mir::mir::PointerCoercion::ClosureFnPointer(unsafety.stable())
+            }
+            PointerCoercion::MutToConstPointer => {
+                stable_mir::mir::PointerCoercion::MutToConstPointer
+            }
+            PointerCoercion::ArrayToPointer => stable_mir::mir::PointerCoercion::ArrayToPointer,
+            PointerCoercion::Unsize => stable_mir::mir::PointerCoercion::Unsize,
+        }
+    }
+}
+
+impl Stable for rustc_hir::Unsafety {
+    type T = stable_mir::mir::Safety;
+    fn stable(&self) -> Self::T {
+        match self {
+            rustc_hir::Unsafety::Unsafe => stable_mir::mir::Safety::Unsafe,
+            rustc_hir::Unsafety::Normal => stable_mir::mir::Safety::Normal,
+        }
+    }
+}
+
+impl Stable for FieldIdx {
+    type T = usize;
+    fn stable(&self) -> Self::T {
+        self.as_usize()
     }
 }
 
@@ -229,34 +369,38 @@ impl Stable for mir::UnwindAction {
     }
 }
 
-fn rustc_assert_msg_to_msg<'tcx>(
-    assert_message: &rustc_middle::mir::AssertMessage<'tcx>,
-) -> stable_mir::mir::AssertMessage {
-    use rustc_middle::mir::AssertKind;
-    match assert_message {
-        AssertKind::BoundsCheck { len, index } => {
-            stable_mir::mir::AssertMessage::BoundsCheck { len: len.stable(), index: index.stable() }
-        }
-        AssertKind::Overflow(bin_op, op1, op2) => {
-            stable_mir::mir::AssertMessage::Overflow(bin_op.stable(), op1.stable(), op2.stable())
-        }
-        AssertKind::OverflowNeg(op) => stable_mir::mir::AssertMessage::OverflowNeg(op.stable()),
-        AssertKind::DivisionByZero(op) => {
-            stable_mir::mir::AssertMessage::DivisionByZero(op.stable())
-        }
-        AssertKind::RemainderByZero(op) => {
-            stable_mir::mir::AssertMessage::RemainderByZero(op.stable())
-        }
-        AssertKind::ResumedAfterReturn(generator) => {
-            stable_mir::mir::AssertMessage::ResumedAfterReturn(generator.stable())
-        }
-        AssertKind::ResumedAfterPanic(generator) => {
-            stable_mir::mir::AssertMessage::ResumedAfterPanic(generator.stable())
-        }
-        AssertKind::MisalignedPointerDereference { required, found } => {
-            stable_mir::mir::AssertMessage::MisalignedPointerDereference {
-                required: required.stable(),
-                found: found.stable(),
+impl<'tcx> Stable for mir::AssertMessage<'tcx> {
+    type T = stable_mir::mir::AssertMessage;
+    fn stable(&self) -> Self::T {
+        use rustc_middle::mir::AssertKind;
+        match self {
+            AssertKind::BoundsCheck { len, index } => stable_mir::mir::AssertMessage::BoundsCheck {
+                len: len.stable(),
+                index: index.stable(),
+            },
+            AssertKind::Overflow(bin_op, op1, op2) => stable_mir::mir::AssertMessage::Overflow(
+                bin_op.stable(),
+                op1.stable(),
+                op2.stable(),
+            ),
+            AssertKind::OverflowNeg(op) => stable_mir::mir::AssertMessage::OverflowNeg(op.stable()),
+            AssertKind::DivisionByZero(op) => {
+                stable_mir::mir::AssertMessage::DivisionByZero(op.stable())
+            }
+            AssertKind::RemainderByZero(op) => {
+                stable_mir::mir::AssertMessage::RemainderByZero(op.stable())
+            }
+            AssertKind::ResumedAfterReturn(generator) => {
+                stable_mir::mir::AssertMessage::ResumedAfterReturn(generator.stable())
+            }
+            AssertKind::ResumedAfterPanic(generator) => {
+                stable_mir::mir::AssertMessage::ResumedAfterPanic(generator.stable())
+            }
+            AssertKind::MisalignedPointerDereference { required, found } => {
+                stable_mir::mir::AssertMessage::MisalignedPointerDereference {
+                    required: required.stable(),
+                    found: found.stable(),
+                }
             }
         }
     }
@@ -381,7 +525,7 @@ impl<'tcx> Stable for mir::Terminator<'tcx> {
             Assert { cond, expected, msg, target, unwind } => Terminator::Assert {
                 cond: cond.stable(),
                 expected: *expected,
-                msg: rustc_assert_msg_to_msg(msg),
+                msg: msg.stable(),
                 target: target.as_usize(),
                 unwind: unwind.stable(),
             },

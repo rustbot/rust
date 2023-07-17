@@ -23,7 +23,7 @@ use crate::channel::{self, GitInfo};
 pub use crate::flags::Subcommand;
 use crate::flags::{Color, Flags, Warnings};
 use crate::util::{exe, output, t};
-use build_helper::detail_exit_macro;
+use build_helper::exit;
 use once_cell::sync::OnceCell;
 use semver::Version;
 use serde::{Deserialize, Deserializer};
@@ -646,7 +646,7 @@ macro_rules! define_config {
                                         panic!("overriding existing option")
                                     } else {
                                         eprintln!("overriding existing option: `{}`", stringify!($field));
-                                        detail_exit_macro!(2);
+                                        exit!(2);
                                     }
                                 } else {
                                     self.$field = other.$field;
@@ -745,7 +745,7 @@ impl<T> Merge for Option<T> {
                             panic!("overriding existing option")
                         } else {
                             eprintln!("overriding existing option");
-                            detail_exit_macro!(2);
+                            exit!(2);
                         }
                     } else {
                         *self = other;
@@ -1101,7 +1101,7 @@ impl Config {
                 .and_then(|table: toml::Value| TomlConfig::deserialize(table))
                 .unwrap_or_else(|err| {
                     eprintln!("failed to parse TOML configuration '{}': {err}", file.display());
-                    detail_exit_macro!(2);
+                    exit!(2);
                 })
         }
         Self::parse_inner(args, get_toml)
@@ -1135,7 +1135,7 @@ impl Config {
             eprintln!(
                 "Cannot use both `llvm_bolt_profile_generate` and `llvm_bolt_profile_use` at the same time"
             );
-            detail_exit_macro!(1);
+            exit!(1);
         }
 
         // Infer the rest of the configuration.
@@ -1259,7 +1259,7 @@ impl Config {
                 }
             }
             eprintln!("failed to parse override `{option}`: `{err}");
-            detail_exit_macro!(2)
+            exit!(2)
         }
         toml.merge(override_toml, ReplaceOpt::Override);
 
@@ -1375,6 +1375,25 @@ impl Config {
         let mut omit_git_hash = None;
 
         if let Some(rust) = toml.rust {
+            set(&mut config.channel, rust.channel);
+
+            config.download_rustc_commit = config.download_ci_rustc_commit(rust.download_rustc);
+            // This list is incomplete, please help by expanding it!
+            if config.download_rustc_commit.is_some() {
+                // We need the channel used by the downloaded compiler to match the one we set for rustdoc;
+                // otherwise rustdoc-ui tests break.
+                let ci_channel = t!(fs::read_to_string(config.src.join("src/ci/channel")));
+                let ci_channel = ci_channel.trim_end();
+                if config.channel != ci_channel
+                    && !(config.channel == "dev" && ci_channel == "nightly")
+                {
+                    panic!(
+                        "setting rust.channel={} is incompatible with download-rustc",
+                        config.channel
+                    );
+                }
+            }
+
             debug = rust.debug;
             debug_assertions = rust.debug_assertions;
             debug_assertions_std = rust.debug_assertions_std;
@@ -1386,6 +1405,7 @@ impl Config {
             debuginfo_level_std = rust.debuginfo_level_std;
             debuginfo_level_tools = rust.debuginfo_level_tools;
             debuginfo_level_tests = rust.debuginfo_level_tests;
+
             config.rust_split_debuginfo = rust
                 .split_debuginfo
                 .as_deref()
@@ -1401,7 +1421,6 @@ impl Config {
             set(&mut config.jemalloc, rust.jemalloc);
             set(&mut config.test_compare_mode, rust.test_compare_mode);
             set(&mut config.backtrace, rust.backtrace);
-            set(&mut config.channel, rust.channel);
             config.description = rust.description;
             set(&mut config.rust_dist_src, rust.dist_src);
             set(&mut config.verbose_tests, rust.verbose_tests);
@@ -1442,8 +1461,6 @@ impl Config {
             config.rust_codegen_units_std = rust.codegen_units_std.map(threads_from_config);
             config.rust_profile_use = flags.rust_profile_use.or(rust.profile_use);
             config.rust_profile_generate = flags.rust_profile_generate.or(rust.profile_generate);
-            config.download_rustc_commit = config.download_ci_rustc_commit(rust.download_rustc);
-
             config.rust_lto = rust
                 .lto
                 .as_deref()
@@ -1555,6 +1572,11 @@ impl Config {
                 let mut target = Target::from_triple(&triple);
 
                 if let Some(ref s) = cfg.llvm_config {
+                    if config.download_rustc_commit.is_some() && triple == &*config.build.triple {
+                        panic!(
+                            "setting llvm_config for the host is incompatible with download-rustc"
+                        );
+                    }
                     target.llvm_config = Some(config.src.join(s));
                 }
                 target.llvm_has_rust_patches = cfg.llvm_has_rust_patches;
@@ -1720,6 +1742,18 @@ impl Config {
         }
     }
 
+    /// Runs a command, printing out nice contextual information if it fails.
+    /// Exits if the command failed to execute at all, otherwise returns its
+    /// `status.success()`.
+    #[deprecated = "use `Builder::try_run` instead where possible"]
+    pub(crate) fn try_run(&self, cmd: &mut Command) -> Result<(), ()> {
+        if self.dry_run() {
+            return Ok(());
+        }
+        self.verbose(&format!("running: {:?}", cmd));
+        build_helper::util::try_run(cmd, self.is_verbose())
+    }
+
     /// A git invocation which runs inside the source directory.
     ///
     /// Use this rather than `Command::new("git")` in order to support out-of-tree builds.
@@ -1825,6 +1859,12 @@ impl Config {
         self.out.join(&*self.build.triple).join("ci-llvm")
     }
 
+    /// Directory where the extracted `rustc-dev` component is stored.
+    pub(crate) fn ci_rustc_dir(&self) -> PathBuf {
+        assert!(self.download_rustc());
+        self.out.join(self.build.triple).join("ci-rustc")
+    }
+
     /// Determine whether llvm should be linked dynamically.
     ///
     /// If `false`, llvm should be linked statically.
@@ -1860,11 +1900,11 @@ impl Config {
         self.download_rustc_commit().is_some()
     }
 
-    pub(crate) fn download_rustc_commit(&self) -> Option<&'static str> {
+    pub(crate) fn download_rustc_commit(&self) -> Option<&str> {
         static DOWNLOAD_RUSTC: OnceCell<Option<String>> = OnceCell::new();
         if self.dry_run() && DOWNLOAD_RUSTC.get().is_none() {
             // avoid trying to actually download the commit
-            return None;
+            return self.download_rustc_commit.as_deref();
         }
 
         DOWNLOAD_RUSTC
@@ -1979,7 +2019,7 @@ impl Config {
                 "Unexpected rustc version: {}, we should use {}/{} to build source with {}",
                 rustc_version, prev_version, source_version, source_version
             );
-            detail_exit_macro!(1);
+            exit!(1);
         }
     }
 
@@ -2015,7 +2055,7 @@ impl Config {
             println!("help: maybe your repository history is too shallow?");
             println!("help: consider disabling `download-rustc`");
             println!("help: or fetch enough history to include one upstream commit");
-            crate::detail_exit_macro!(1);
+            crate::exit!(1);
         }
 
         // Warn if there were changes to the compiler or standard library since the ancestor commit.

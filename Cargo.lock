@@ -1529,9 +1529,9 @@ dependencies = [
 
 [[package]]
 name = "hermit-abi"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fed44880c466736ef9a5c5b5facefb5ed0785676d0c02d612db14e54f0d84286"
+checksum = "443144c8cdadd93ebf52ddb4056d257f5b52c04d3c804e657d19eb73fc33668b"
 dependencies = [
  "compiler_builtins",
  "rustc-std-workspace-alloc",
@@ -1864,7 +1864,7 @@ version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eae7b9aee968036d54dce06cebaefd919e4472e753296daccd6d344e3e2df0c2"
 dependencies = [
- "hermit-abi 0.3.1",
+ "hermit-abi 0.3.2",
  "libc",
  "windows-sys 0.48.0",
 ]
@@ -1881,7 +1881,7 @@ version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "24fddda5af7e54bf7da53067d6e802dbcc381d0a8eef629df528e3ebf68755cb"
 dependencies = [
- "hermit-abi 0.3.1",
+ "hermit-abi 0.3.2",
  "rustix 0.38.2",
  "windows-sys 0.48.0",
 ]
@@ -2396,7 +2396,7 @@ version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4161fcb6d602d4d2081af7c3a45852d875a03dd337a6bfdd6e06407b61342a43"
 dependencies = [
- "hermit-abi 0.3.1",
+ "hermit-abi 0.3.2",
  "libc",
 ]
 
@@ -3021,7 +3021,6 @@ dependencies = [
 name = "rls"
 version = "2.0.0"
 dependencies = [
- "serde",
  "serde_json",
 ]
 
@@ -3666,6 +3665,7 @@ name = "rustc_hir_typeck"
 version = "0.1.0"
 dependencies = [
  "rustc_ast",
+ "rustc_attr",
  "rustc_data_structures",
  "rustc_errors",
  "rustc_fluent_macro",
@@ -4234,6 +4234,7 @@ dependencies = [
  "rustc_hir",
  "rustc_middle",
  "rustc_span",
+ "rustc_target",
  "scoped-tls",
  "tracing",
 ]
@@ -4819,7 +4820,7 @@ dependencies = [
  "dlmalloc",
  "fortanix-sgx-abi",
  "hashbrown 0.14.0",
- "hermit-abi 0.3.1",
+ "hermit-abi 0.3.2",
  "libc",
  "miniz_oxide",
  "object",

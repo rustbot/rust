@@ -279,9 +279,6 @@ fn run_compiler(
 
     let sopts = config::build_session_options(&mut early_error_handler, &matches);
 
-    // Set parallel mode before thread pool creation, which will create `Lock`s.
-    interface::set_thread_safe_mode(&sopts.unstable_opts);
-
     if let Some(ref code) = matches.opt_str("explain") {
         handle_explain(&early_error_handler, diagnostics_registry(), code, sopts.color);
         return Ok(());
@@ -1453,13 +1450,13 @@ mod signal_handler {
     /// When an error signal (such as SIGABRT or SIGSEGV) is delivered to the
     /// process, print a stack trace and then exit.
     pub(super) fn install() {
+        use std::alloc::{alloc, Layout};
+
         unsafe {
-            const ALT_STACK_SIZE: usize = libc::MINSIGSTKSZ + 64 * 1024;
+            let alt_stack_size: usize = min_sigstack_size() + 64 * 1024;
             let mut alt_stack: libc::stack_t = std::mem::zeroed();
-            alt_stack.ss_sp =
-                std::alloc::alloc(std::alloc::Layout::from_size_align(ALT_STACK_SIZE, 1).unwrap())
-                    as *mut libc::c_void;
-            alt_stack.ss_size = ALT_STACK_SIZE;
+            alt_stack.ss_sp = alloc(Layout::from_size_align(alt_stack_size, 1).unwrap()).cast();
+            alt_stack.ss_size = alt_stack_size;
             libc::sigaltstack(&alt_stack, std::ptr::null_mut());
 
             let mut sa: libc::sigaction = std::mem::zeroed();
@@ -1468,6 +1465,23 @@ mod signal_handler {
             libc::sigemptyset(&mut sa.sa_mask);
             libc::sigaction(libc::SIGSEGV, &sa, std::ptr::null_mut());
         }
+    }
+
+    /// Modern kernels on modern hardware can have dynamic signal stack sizes.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    fn min_sigstack_size() -> usize {
+        const AT_MINSIGSTKSZ: core::ffi::c_ulong = 51;
+        let dynamic_sigstksz = unsafe { libc::getauxval(AT_MINSIGSTKSZ) };
+        // If getauxval couldn't find the entry, it returns 0,
+        // so take the higher of the "constant" and auxval.
+        // This transparently supports older kernels which don't provide AT_MINSIGSTKSZ
+        libc::MINSIGSTKSZ.max(dynamic_sigstksz as _)
+    }
+
+    /// Not all OS support hardware where this is needed.
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    fn min_sigstack_size() -> usize {
+        libc::MINSIGSTKSZ
     }
 }
 

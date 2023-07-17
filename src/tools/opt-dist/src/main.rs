@@ -7,7 +7,10 @@ use crate::tests::run_tests;
 use crate::timer::Timer;
 use crate::training::{gather_llvm_bolt_profiles, gather_llvm_profiles, gather_rustc_profiles};
 use crate::utils::io::reset_directory;
-use crate::utils::{clear_llvm_files, format_env_variables, print_free_disk_space};
+use crate::utils::{
+    clear_llvm_files, format_env_variables, print_binary_sizes, print_free_disk_space,
+    with_log_group,
+};
 
 mod environment;
 mod exec;
@@ -27,7 +30,8 @@ fn execute_pipeline(
     dist_args: Vec<String>,
 ) -> anyhow::Result<()> {
     reset_directory(&env.opt_artifacts())?;
-    env.prepare_rustc_perf()?;
+
+    with_log_group("Building rustc-perf", || env.prepare_rustc_perf())?;
 
     // Stage 1: Build PGO instrumented rustc
     // We use a normal build of LLVM, because gathering PGO profiles for LLVM and `rustc` at the
@@ -139,12 +143,17 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     let mut build_args: Vec<String> = std::env::args().skip(1).collect();
-    log::info!("Running optimized build pipeline with args `{}`", build_args.join(" "));
-    log::info!("Environment values\n{}", format_env_variables());
+    println!("Running optimized build pipeline with args `{}`", build_args.join(" "));
 
-    if let Ok(config) = std::fs::read_to_string("config.toml") {
-        log::info!("Contents of `config.toml`:\n{config}");
-    }
+    with_log_group("Environment values", || {
+        println!("Environment values\n{}", format_env_variables());
+    });
+
+    with_log_group("Printing config.toml", || {
+        if let Ok(config) = std::fs::read_to_string("config.toml") {
+            println!("Contents of `config.toml`:\n{config}");
+        }
+    });
 
     // Skip components that are not needed for try builds to speed them up
     if is_try_build() {
@@ -170,6 +179,8 @@ fn main() -> anyhow::Result<()> {
     log::info!("Timer results\n{}", timer.format_stats());
 
     print_free_disk_space()?;
+    result.context("Optimized build pipeline has failed")?;
+    print_binary_sizes(env.as_ref())?;
 
-    result.context("Optimized build pipeline has failed")
+    Ok(())
 }

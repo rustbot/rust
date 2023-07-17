@@ -335,8 +335,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         expected: Ty<'tcx>,
         mut def_bm: BindingMode,
     ) -> (Ty<'tcx>, BindingMode) {
-        let mut expected = self.resolve_vars_with_obligations(expected);
-
+        let mut expected = self.try_structurally_resolve_type(pat.span, expected);
         // Peel off as many `&` or `&mut` from the scrutinee type as possible. For example,
         // for `match &&&mut Some(5)` the loop runs three times, aborting when it reaches
         // the `Some(5)` which is not of type Ref.
@@ -353,7 +352,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             // Preserve the reference type. We'll need it later during THIR lowering.
             pat_adjustments.push(expected);
 
-            expected = inner_ty;
+            expected = self.try_structurally_resolve_type(pat.span, inner_ty);
             def_bm = ty::BindByReference(match def_bm {
                 // If default binding mode is by value, make it `ref` or `ref mut`
                 // (depending on whether we observe `&` or `&mut`).
@@ -627,6 +626,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         local_ty
     }
 
+    /// When a variable is bound several times in a `PatKind::Or`, it'll resolve all of the
+    /// subsequent bindings of the same name to the first usage. Verify that all of these
+    /// bindings have the same type by comparing them all against the type of that first pat.
     fn check_binding_alt_eq_ty(
         &self,
         ba: hir::BindingAnnotation,
@@ -638,7 +640,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let var_ty = self.local_ty(span, var_id);
         if let Some(mut err) = self.demand_eqtype_pat_diag(span, var_ty, ty, ti) {
             let hir = self.tcx.hir();
-            let var_ty = self.resolve_vars_with_obligations(var_ty);
+            let var_ty = self.resolve_vars_if_possible(var_ty);
             let msg = format!("first introduced with type `{var_ty}` here");
             err.span_label(hir.span(var_id), msg);
             let in_match = hir.parent_iter(var_id).any(|(_, n)| {
@@ -656,7 +658,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 &mut err,
                 span,
                 var_ty,
-                self.resolve_vars_with_obligations(ty),
+                self.resolve_vars_if_possible(ty),
                 ba,
             );
             err.emit();
@@ -1092,12 +1094,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         if subpats.len() == variant.fields.len()
             || subpats.len() < variant.fields.len() && ddpos.as_opt_usize().is_some()
         {
-            let ty::Adt(_, substs) = pat_ty.kind() else {
+            let ty::Adt(_, args) = pat_ty.kind() else {
                 bug!("unexpected pattern type {:?}", pat_ty);
             };
             for (i, subpat) in subpats.iter().enumerate_and_adjust(variant.fields.len(), ddpos) {
                 let field = &variant.fields[FieldIdx::from_usize(i)];
-                let field_ty = self.field_ty(subpat.span, field, substs);
+                let field_ty = self.field_ty(subpat.span, field, args);
                 self.check_pat(subpat, field_ty, def_bm, ti);
 
                 self.tcx.check_stability(
@@ -1180,10 +1182,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // with the subpatterns directly in the tuple variant pattern, e.g., `V_i(p_0, .., p_N)`.
         let missing_parentheses = match (&expected.kind(), fields, had_err) {
             // #67037: only do this if we could successfully type-check the expected type against
-            // the tuple struct pattern. Otherwise the substs could get out of range on e.g.,
+            // the tuple struct pattern. Otherwise the args could get out of range on e.g.,
             // `let P() = U;` where `P != U` with `struct P<T>(T);`.
-            (ty::Adt(_, substs), [field], false) => {
-                let field_ty = self.field_ty(pat_span, field, substs);
+            (ty::Adt(_, args), [field], false) => {
+                let field_ty = self.field_ty(pat_span, field, args);
                 match field_ty.kind() {
                     ty::Tuple(fields) => fields.len() == subpats.len(),
                     _ => false,
@@ -1333,7 +1335,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     ) -> bool {
         let tcx = self.tcx;
 
-        let ty::Adt(adt, substs) = adt_ty.kind() else {
+        let ty::Adt(adt, args) = adt_ty.kind() else {
             span_bug!(pat.span, "struct pattern is not an ADT");
         };
 
@@ -1366,7 +1368,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         .map(|(i, f)| {
                             self.write_field_index(field.hir_id, *i);
                             self.tcx.check_stability(f.did, Some(pat.hir_id), span, None);
-                            self.field_ty(span, f, substs)
+                            self.field_ty(span, f, args)
                         })
                         .unwrap_or_else(|| {
                             inexistent_fields.push(field);
@@ -1394,7 +1396,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 &inexistent_fields,
                 &mut unmentioned_fields,
                 variant,
-                substs,
+                args,
             ))
         } else {
             None
@@ -1564,7 +1566,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         inexistent_fields: &[&hir::PatField<'tcx>],
         unmentioned_fields: &mut Vec<(&'tcx ty::FieldDef, Ident)>,
         variant: &ty::VariantDef,
-        substs: &'tcx ty::List<ty::subst::GenericArg<'tcx>>,
+        args: &'tcx ty::List<ty::GenericArg<'tcx>>,
     ) -> DiagnosticBuilder<'tcx, ErrorGuaranteed> {
         let tcx = self.tcx;
         let (field_names, t, plural) = if inexistent_fields.len() == 1 {
@@ -1634,7 +1636,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                                 self.field_ty(
                                     unmentioned_fields[0].1.span,
                                     unmentioned_fields[0].0,
-                                    substs,
+                                    args,
                                 ),
                             ) => {}
                         _ => {

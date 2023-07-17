@@ -1392,6 +1392,11 @@ fn print_native_static_libs(
     let mut lib_args: Vec<_> = all_native_libs
         .iter()
         .filter(|l| relevant_lib(sess, l))
+        // Deduplication of successive repeated libraries, see rust-lang/rust#113209
+        //
+        // note: we don't use PartialEq/Eq because NativeLib transitively depends on local
+        // elements like spans, which we don't care about and would make the deduplication impossible
+        .dedup_by(|l1, l2| l1.name == l2.name && l1.kind == l2.kind && l1.verbatim == l2.verbatim)
         .filter_map(|lib| {
             let name = lib.name;
             match lib.kind {
@@ -2970,10 +2975,25 @@ fn add_lld_args(cmd: &mut dyn Linker, sess: &Session, flavor: LinkerFlavor) {
         return;
     }
 
+    let self_contained_linker = sess.opts.cg.link_self_contained.linker();
+
+    // FIXME: some targets default to using `lld`, but users can only override the linker on the CLI
+    // and cannot yet select the precise linker flavor to opt out of that. See for example issue
+    // #113597 for the `thumbv6m-none-eabi` target: a driver is used, and its default linker
+    // conflicts with the target's flavor, causing unexpected arguments being passed.
+    //
+    // Until the new `LinkerFlavor`-like CLI options are stabilized, we only adopt MCP510's behavior
+    // if its dedicated unstable CLI flags are used, to keep the current sub-optimal stable
+    // behavior.
+    let using_mcp510 =
+        self_contained_linker || sess.opts.cg.linker_flavor.is_some_and(|f| f.is_unstable());
+    if !using_mcp510 && !unstable_use_lld {
+        return;
+    }
+
     // 1. Implement the "self-contained" part of this feature by adding rustc distribution
     //    directories to the tool's search path.
-    let self_contained_linker = sess.opts.cg.link_self_contained.linker() || unstable_use_lld;
-    if self_contained_linker {
+    if self_contained_linker || unstable_use_lld {
         for path in sess.get_tools_search_paths(false) {
             cmd.arg({
                 let mut arg = OsString::from("-B");

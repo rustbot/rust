@@ -1155,7 +1155,7 @@ extern "C" {
     pub fn LLVMConstVector(ScalarConstantVals: *const &Value, Size: c_uint) -> &Value;
 
     // Constant expressions
-    pub fn LLVMRustConstInBoundsGEP2<'a>(
+    pub fn LLVMConstInBoundsGEP2<'a>(
         ty: &'a Type,
         ConstantVal: &'a Value,
         ConstantIndices: *const &'a Value,
@@ -1916,7 +1916,6 @@ extern "C" {
     );
 
     pub fn LLVMRustCoverageCreatePGOFuncNameVar(F: &Value, FuncName: *const c_char) -> &Value;
-    pub fn LLVMRustCoverageHashCString(StrVal: *const c_char) -> u64;
     pub fn LLVMRustCoverageHashByteArray(Bytes: *const c_char, NumBytes: size_t) -> u64;
 
     #[allow(improper_ctypes)]

@@ -13,7 +13,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use crate::cache::{Cache, Interned, INTERNER};
-use crate::config::{SplitDebuginfo, TargetSelection};
+use crate::config::{DryRun, SplitDebuginfo, TargetSelection};
 use crate::doc;
 use crate::flags::{Color, Subcommand};
 use crate::install;
@@ -114,6 +114,43 @@ impl RunConfig<'_> {
             crates.push(crate_name.to_string());
         }
         INTERNER.intern_list(crates)
+    }
+
+    /// Given an `alias` selected by the `Step` and the paths passed on the command line,
+    /// return a list of the crates that should be built.
+    ///
+    /// Normally, people will pass *just* `library` if they pass it.
+    /// But it's possible (although strange) to pass something like `library std core`.
+    /// Build all crates anyway, as if they hadn't passed the other args.
+    pub fn make_run_crates(&self, alias: Alias) -> Interned<Vec<String>> {
+        let has_alias =
+            self.paths.iter().any(|set| set.assert_single_path().path.ends_with(alias.as_str()));
+        if !has_alias {
+            return self.cargo_crates_in_set();
+        }
+
+        let crates = match alias {
+            Alias::Library => self.builder.in_tree_crates("sysroot", Some(self.target)),
+            Alias::Compiler => self.builder.in_tree_crates("rustc-main", Some(self.target)),
+        };
+
+        let crate_names = crates.into_iter().map(|krate| krate.name.to_string()).collect();
+        INTERNER.intern_list(crate_names)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum Alias {
+    Library,
+    Compiler,
+}
+
+impl Alias {
+    fn as_str(self) -> &'static str {
+        match self {
+            Alias::Library => "library",
+            Alias::Compiler => "compiler",
+        }
     }
 }
 
@@ -281,11 +318,15 @@ impl StepDescription {
 
     fn is_excluded(&self, builder: &Builder<'_>, pathset: &PathSet) -> bool {
         if builder.config.exclude.iter().any(|e| pathset.has(&e, builder.kind)) {
-            println!("Skipping {:?} because it is excluded", pathset);
+            if !matches!(builder.config.dry_run, DryRun::SelfCheck) {
+                println!("Skipping {:?} because it is excluded", pathset);
+            }
             return true;
         }
 
-        if !builder.config.exclude.is_empty() {
+        if !builder.config.exclude.is_empty()
+            && !matches!(builder.config.dry_run, DryRun::SelfCheck)
+        {
             builder.verbose(&format!(
                 "{:?} not skipped for {:?} -- not in {:?}",
                 pathset, self.name, builder.config.exclude
@@ -354,7 +395,7 @@ impl StepDescription {
             eprintln!(
                 "note: if you are adding a new Step to bootstrap itself, make sure you register it with `describe!`"
             );
-            crate::detail_exit_macro!(1);
+            crate::exit!(1);
         }
     }
 }
@@ -898,21 +939,6 @@ impl<'a> Builder<'a> {
         Self::new_internal(build, kind, paths.to_owned())
     }
 
-    /// Creates a new standalone builder for use outside of the normal process
-    pub fn new_standalone(
-        build: &mut Build,
-        kind: Kind,
-        paths: Vec<PathBuf>,
-        stage: Option<u32>,
-    ) -> Builder<'_> {
-        // FIXME: don't mutate `build`
-        if let Some(stage) = stage {
-            build.config.stage = stage;
-        }
-
-        Self::new_internal(build, kind, paths.to_owned())
-    }
-
     pub fn execute_cli(&self) {
         self.run_step_descriptions(&Builder::get_step_descriptions(self.kind), &self.paths);
     }
@@ -1334,7 +1360,7 @@ impl<'a> Builder<'a> {
                         "error: `x.py clippy` requires a host `rustc` toolchain with the `clippy` component"
                     );
                     eprintln!("help: try `rustup component add clippy`");
-                    crate::detail_exit_macro!(1);
+                    crate::exit!(1);
                 });
                 if !t!(std::str::from_utf8(&output.stdout)).contains("nightly") {
                     rustflags.arg("--cfg=bootstrap");
