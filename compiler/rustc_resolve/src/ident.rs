@@ -677,6 +677,7 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                                         ident: orig_ident,
                                         b1: innermost_binding,
                                         b2: binding,
+                                        warning: false,
                                         misc1: misc(innermost_flags),
                                         misc2: misc(flags),
                                     });
@@ -905,6 +906,7 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                     ident,
                     b1: binding,
                     b2: shadowed_glob,
+                    warning: false,
                     misc1: AmbiguityErrorMisc::None,
                     misc2: AmbiguityErrorMisc::None,
                 });
@@ -1417,13 +1419,13 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                         ));
                         continue;
                     }
-                    if name == kw::PathRoot && ident.span.rust_2018() {
+                    if name == kw::PathRoot && ident.span.at_least_rust_2018() {
                         module = Some(ModuleOrUniformRoot::ExternPrelude);
                         continue;
                     }
                     if name == kw::PathRoot
                         && ident.span.is_rust_2015()
-                        && self.tcx.sess.rust_2018()
+                        && self.tcx.sess.at_least_rust_2018()
                     {
                         // `::a::b` from 2015 macro on 2018 global edition
                         module = Some(ModuleOrUniformRoot::CrateRootAndExternPrelude);
@@ -1443,12 +1445,12 @@ impl<'a, 'tcx> Resolver<'a, 'tcx> {
                     let name_str = if name == kw::PathRoot {
                         "crate root".to_string()
                     } else {
-                        format!("`{}`", name)
+                        format!("`{name}`")
                     };
                     let label = if segment_idx == 1 && path[0].ident.name == kw::PathRoot {
-                        format!("global paths cannot start with {}", name_str)
+                        format!("global paths cannot start with {name_str}")
                     } else {
-                        format!("{} in paths can only be used in start position", name_str)
+                        format!("{name_str} in paths can only be used in start position")
                     };
                     (label, None)
                 });

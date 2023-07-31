@@ -42,7 +42,7 @@ fn sized_constraint_for_ty<'tcx>(
             let adt_tys = adt.sized_constraint(tcx);
             debug!("sized_constraint_for_ty({:?}) intermediate = {:?}", ty, adt_tys);
             adt_tys
-                .arg_iter_copied(tcx, args)
+                .iter_instantiated_copied(tcx, args)
                 .flat_map(|ty| sized_constraint_for_ty(tcx, adtdef, ty))
                 .collect()
         }
@@ -129,7 +129,9 @@ fn param_env(tcx: TyCtxt<'_>, def_id: DefId) -> ty::ParamEnv<'_> {
     // sure that this will succeed without errors anyway.
 
     if tcx.def_kind(def_id) == DefKind::AssocFn
-        && tcx.associated_item(def_id).container == ty::AssocItemContainer::TraitContainer
+        && let assoc_item = tcx.associated_item(def_id)
+        && assoc_item.container == ty::AssocItemContainer::TraitContainer
+        && assoc_item.defaultness(tcx).has_value()
     {
         let sig = tcx.fn_sig(def_id).instantiate_identity();
         // We accounted for the binder of the fn sig, so skip the binder.
@@ -144,85 +146,9 @@ fn param_env(tcx: TyCtxt<'_>, def_id: DefId) -> ty::ParamEnv<'_> {
     }
 
     let local_did = def_id.as_local();
-    // FIXME(-Zlower-impl-trait-in-trait-to-assoc-ty): This isn't correct for
-    // RPITITs in const trait fn.
-    let hir_id = local_did.and_then(|def_id| tcx.opt_local_def_id_to_hir_id(def_id));
-
-    // FIXME(consts): This is not exactly in line with the constness query.
-    let constness = match hir_id {
-        Some(hir_id) => match tcx.hir().get(hir_id) {
-            hir::Node::TraitItem(hir::TraitItem { kind: hir::TraitItemKind::Fn(..), .. })
-                if tcx.is_const_default_method(def_id) =>
-            {
-                hir::Constness::Const
-            }
-
-            hir::Node::Item(hir::Item { kind: hir::ItemKind::Const(..), .. })
-            | hir::Node::Item(hir::Item { kind: hir::ItemKind::Static(..), .. })
-            | hir::Node::TraitItem(hir::TraitItem {
-                kind: hir::TraitItemKind::Const(..), ..
-            })
-            | hir::Node::AnonConst(_)
-            | hir::Node::ConstBlock(_)
-            | hir::Node::ImplItem(hir::ImplItem { kind: hir::ImplItemKind::Const(..), .. })
-            | hir::Node::ImplItem(hir::ImplItem {
-                kind:
-                    hir::ImplItemKind::Fn(
-                        hir::FnSig {
-                            header: hir::FnHeader { constness: hir::Constness::Const, .. },
-                            ..
-                        },
-                        ..,
-                    ),
-                ..
-            }) => hir::Constness::Const,
-
-            hir::Node::ImplItem(hir::ImplItem {
-                kind: hir::ImplItemKind::Type(..) | hir::ImplItemKind::Fn(..),
-                ..
-            }) => {
-                let parent_hir_id = tcx.hir().parent_id(hir_id);
-                match tcx.hir().get(parent_hir_id) {
-                    hir::Node::Item(hir::Item {
-                        kind: hir::ItemKind::Impl(hir::Impl { constness, .. }),
-                        ..
-                    }) => *constness,
-                    _ => span_bug!(
-                        tcx.def_span(parent_hir_id.owner),
-                        "impl item's parent node is not an impl",
-                    ),
-                }
-            }
-
-            hir::Node::Item(hir::Item {
-                kind:
-                    hir::ItemKind::Fn(hir::FnSig { header: hir::FnHeader { constness, .. }, .. }, ..),
-                ..
-            })
-            | hir::Node::TraitItem(hir::TraitItem {
-                kind:
-                    hir::TraitItemKind::Fn(
-                        hir::FnSig { header: hir::FnHeader { constness, .. }, .. },
-                        ..,
-                    ),
-                ..
-            })
-            | hir::Node::Item(hir::Item {
-                kind: hir::ItemKind::Impl(hir::Impl { constness, .. }),
-                ..
-            }) => *constness,
-
-            _ => hir::Constness::NotConst,
-        },
-        // FIXME(consts): It's suspicious that a param-env for a foreign item
-        // will always have NotConst param-env, though we don't typically use
-        // that param-env for anything meaningful right now, so it's likely
-        // not an issue.
-        None => hir::Constness::NotConst,
-    };
 
     let unnormalized_env =
-        ty::ParamEnv::new(tcx.mk_clauses(&predicates), traits::Reveal::UserFacing, constness);
+        ty::ParamEnv::new(tcx.mk_clauses(&predicates), traits::Reveal::UserFacing);
 
     let body_id = local_did.unwrap_or(CRATE_DEF_ID);
     let cause = traits::ObligationCause::misc(tcx.def_span(def_id), body_id);
@@ -297,7 +223,7 @@ impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for ImplTraitInTraitFinder<'_, 'tcx> {
             for bound in self
                 .tcx
                 .item_bounds(unshifted_alias_ty.def_id)
-                .arg_iter(self.tcx, unshifted_alias_ty.args)
+                .iter_instantiated(self.tcx, unshifted_alias_ty.args)
             {
                 bound.visit_with(self);
             }

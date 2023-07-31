@@ -9,11 +9,9 @@ use rustc_hir::def::{DefKind, Res};
 use rustc_hir::{BinOp, BinOpKind, Block, ConstBlock, Expr, ExprKind, HirId, Item, ItemKind, Node, QPath, UnOp};
 use rustc_lexer::tokenize;
 use rustc_lint::LateContext;
-use rustc_middle::mir;
 use rustc_middle::mir::interpret::Scalar;
-use rustc_middle::ty::{self, EarlyBinder, FloatTy, ScalarInt, Ty, TyCtxt};
-use rustc_middle::ty::{List, GenericArgsRef};
-use rustc_middle::{bug, span_bug};
+use rustc_middle::ty::{self, EarlyBinder, FloatTy, GenericArgsRef, List, ScalarInt, Ty, TyCtxt};
+use rustc_middle::{bug, mir, span_bug};
 use rustc_span::symbol::{Ident, Symbol};
 use rustc_span::SyntaxContext;
 use std::cmp::Ordering::{self, Equal};
@@ -155,7 +153,7 @@ impl<'tcx> Constant<'tcx> {
             },
             (Self::Vec(l), Self::Vec(r)) => {
                 let (ty::Array(cmp_type, _) | ty::Slice(cmp_type)) = *cmp_type.kind() else {
-                    return None
+                    return None;
                 };
                 iter::zip(l, r)
                     .map(|(li, ri)| Self::partial_cmp(tcx, cmp_type, li, ri))
@@ -267,7 +265,7 @@ pub fn constant_with_source<'tcx>(
     res.map(|x| (x, ctxt.source))
 }
 
-/// Attempts to evaluate an expression only if it's value is not dependent on other items.
+/// Attempts to evaluate an expression only if its value is not dependent on other items.
 pub fn constant_simple<'tcx>(
     lcx: &LateContext<'tcx>,
     typeck_results: &ty::TypeckResults<'tcx>,
@@ -463,7 +461,7 @@ impl<'a, 'tcx> ConstEvalLateContext<'a, 'tcx> {
                 // Check if this constant is based on `cfg!(..)`,
                 // which is NOT constant for our purposes.
                 if let Some(node) = self.lcx.tcx.hir().get_if_local(def_id)
-                    && let Node::Item(Item { kind: ItemKind::Const(_, body_id), .. }) = node
+                    && let Node::Item(Item { kind: ItemKind::Const(.., body_id), .. }) = node
                     && let Node::Expr(Expr { kind: ExprKind::Lit(_), span, .. }) = self.lcx
                         .tcx
                         .hir()

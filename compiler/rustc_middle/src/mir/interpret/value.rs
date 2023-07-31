@@ -135,8 +135,8 @@ static_assert_size!(Scalar, 24);
 impl<Prov: Provenance> fmt::Debug for Scalar<Prov> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Scalar::Ptr(ptr, _size) => write!(f, "{:?}", ptr),
-            Scalar::Int(int) => write!(f, "{:?}", int),
+            Scalar::Ptr(ptr, _size) => write!(f, "{ptr:?}"),
+            Scalar::Int(int) => write!(f, "{int:?}"),
         }
     }
 }
@@ -144,8 +144,8 @@ impl<Prov: Provenance> fmt::Debug for Scalar<Prov> {
 impl<Prov: Provenance> fmt::Display for Scalar<Prov> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Scalar::Ptr(ptr, _size) => write!(f, "pointer to {:?}", ptr),
-            Scalar::Int(int) => write!(f, "{}", int),
+            Scalar::Ptr(ptr, _size) => write!(f, "pointer to {ptr:?}"),
+            Scalar::Int(int) => write!(f, "{int}"),
         }
     }
 }
@@ -153,8 +153,8 @@ impl<Prov: Provenance> fmt::Display for Scalar<Prov> {
 impl<Prov: Provenance> fmt::LowerHex for Scalar<Prov> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Scalar::Ptr(ptr, _size) => write!(f, "pointer to {:?}", ptr),
-            Scalar::Int(int) => write!(f, "{:#x}", int),
+            Scalar::Ptr(ptr, _size) => write!(f, "pointer to {ptr:?}"),
+            Scalar::Int(int) => write!(f, "{int:#x}"),
         }
     }
 }
@@ -319,6 +319,14 @@ impl<Prov> Scalar<Prov> {
                 Right(ptr)
             }
         })
+    }
+
+    #[inline]
+    pub fn size(self) -> Size {
+        match self {
+            Scalar::Int(int) => int.size(),
+            Scalar::Ptr(_ptr, sz) => Size::from_bytes(sz),
+        }
     }
 }
 

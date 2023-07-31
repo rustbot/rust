@@ -231,9 +231,15 @@ impl<'hir> LoweringContext<'_, 'hir> {
                 let (ty, body_id) = self.lower_const_item(t, span, e.as_deref());
                 hir::ItemKind::Static(ty, *m, body_id)
             }
-            ItemKind::Const(box ast::ConstItem { ty, expr, .. }) => {
-                let (ty, body_id) = self.lower_const_item(ty, span, expr.as_deref());
-                hir::ItemKind::Const(ty, body_id)
+            ItemKind::Const(box ast::ConstItem { generics, ty, expr, .. }) => {
+                let (generics, (ty, body_id)) = self.lower_generics(
+                    generics,
+                    Const::No,
+                    id,
+                    &ImplTraitContext::Disallowed(ImplTraitPosition::Generic),
+                    |this| this.lower_const_item(ty, span, expr.as_deref()),
+                );
+                hir::ItemKind::Const(ty, generics, body_id)
             }
             ItemKind::Fn(box Fn {
                 sig: FnSig { decl, header, span: fn_sig_span },
@@ -551,17 +557,6 @@ impl<'hir> LoweringContext<'_, 'hir> {
                 for &(ref use_tree, id) in trees {
                     let new_hir_id = self.local_def_id(id);
 
-                    let mut prefix = prefix.clone();
-
-                    // Give the segments new node-ids since they are being cloned.
-                    for seg in &mut prefix.segments {
-                        // Give the cloned segment the same resolution information
-                        // as the old one (this is needed for stability checking).
-                        let new_id = self.next_node_id();
-                        self.resolver.clone_res(seg.id, new_id);
-                        seg.id = new_id;
-                    }
-
                     // Each `use` import is an item and thus are owners of the
                     // names in the path. Up to this point the nested import is
                     // the current owner, since we want each desugared import to
@@ -570,6 +565,9 @@ impl<'hir> LoweringContext<'_, 'hir> {
                     self.with_hir_id_owner(id, |this| {
                         let mut ident = *ident;
 
+                        // `prefix` is lowered multiple times, but in different HIR owners.
+                        // So each segment gets renewed `HirId` with the same
+                        // `ItemLocalId` and the new owner. (See `lower_node_id`)
                         let kind =
                             this.lower_use_tree(use_tree, &prefix, id, vis_span, &mut ident, attrs);
                         if let Some(attrs) = attrs {
@@ -723,11 +721,23 @@ impl<'hir> LoweringContext<'_, 'hir> {
         let trait_item_def_id = hir_id.expect_owner();
 
         let (generics, kind, has_default) = match &i.kind {
-            AssocItemKind::Const(box ConstItem { ty, expr, .. }) => {
-                let ty =
-                    self.lower_ty(ty, &ImplTraitContext::Disallowed(ImplTraitPosition::ConstTy));
-                let body = expr.as_ref().map(|x| self.lower_const_body(i.span, Some(x)));
-                (hir::Generics::empty(), hir::TraitItemKind::Const(ty, body), body.is_some())
+            AssocItemKind::Const(box ConstItem { generics, ty, expr, .. }) => {
+                let (generics, kind) = self.lower_generics(
+                    &generics,
+                    Const::No,
+                    i.id,
+                    &ImplTraitContext::Disallowed(ImplTraitPosition::Generic),
+                    |this| {
+                        let ty = this.lower_ty(
+                            ty,
+                            &ImplTraitContext::Disallowed(ImplTraitPosition::ConstTy),
+                        );
+                        let body = expr.as_ref().map(|x| this.lower_const_body(i.span, Some(x)));
+
+                        hir::TraitItemKind::Const(ty, body)
+                    },
+                );
+                (generics, kind, expr.is_some())
             }
             AssocItemKind::Fn(box Fn { sig, generics, body: None, .. }) => {
                 let asyncness = sig.header.asyncness;
@@ -825,14 +835,19 @@ impl<'hir> LoweringContext<'_, 'hir> {
         self.lower_attrs(hir_id, &i.attrs);
 
         let (generics, kind) = match &i.kind {
-            AssocItemKind::Const(box ConstItem { ty, expr, .. }) => {
-                let ty =
-                    self.lower_ty(ty, &ImplTraitContext::Disallowed(ImplTraitPosition::ConstTy));
-                (
-                    hir::Generics::empty(),
-                    hir::ImplItemKind::Const(ty, self.lower_const_body(i.span, expr.as_deref())),
-                )
-            }
+            AssocItemKind::Const(box ConstItem { generics, ty, expr, .. }) => self.lower_generics(
+                &generics,
+                Const::No,
+                i.id,
+                &ImplTraitContext::Disallowed(ImplTraitPosition::Generic),
+                |this| {
+                    let ty = this
+                        .lower_ty(ty, &ImplTraitContext::Disallowed(ImplTraitPosition::ConstTy));
+                    let body = this.lower_const_body(i.span, expr.as_deref());
+
+                    hir::ImplItemKind::Const(ty, body)
+                },
+            ),
             AssocItemKind::Fn(box Fn { sig, generics, body, .. }) => {
                 self.current_item = Some(i.span);
                 let asyncness = sig.header.asyncness;

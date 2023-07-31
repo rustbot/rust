@@ -6,11 +6,11 @@ use rustc_span::symbol::sym;
 use std::mem;
 
 use crate::clean;
+use crate::clean::utils::inherits_doc_hidden;
 use crate::clean::{Item, ItemIdSet};
 use crate::core::DocContext;
 use crate::fold::{strip_item, DocFolder};
 use crate::passes::{ImplStripper, Pass};
-use crate::visit_ast::inherits_doc_hidden;
 
 pub(crate) const STRIP_HIDDEN: Pass = Pass {
     name: "strip-hidden",
@@ -42,6 +42,7 @@ pub(crate) fn strip_hidden(krate: clean::Crate, cx: &mut DocContext<'_>) -> clea
         cache: &cx.cache,
         is_json_output,
         document_private: cx.render_options.document_private,
+        document_hidden: cx.render_options.document_hidden,
     };
     stripper.fold_crate(krate)
 }

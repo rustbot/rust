@@ -18,7 +18,7 @@ use rustc_data_structures::captures::Captures;
 use rustc_data_structures::fx::FxHashSet;
 use rustc_hir as hir;
 use rustc_hir::def::DefKind;
-use rustc_hir::def_id::DefId;
+use rustc_hir::def_id::{DefId, LOCAL_CRATE};
 use rustc_metadata::creader::{CStore, LoadedMacro};
 use rustc_middle::ty;
 use rustc_middle::ty::TyCtxt;
@@ -662,6 +662,14 @@ pub(crate) fn href_with_root_path(
             // documented on their parent's page
             tcx.parent(did)
         }
+        DefKind::ExternCrate => {
+            // Link to the crate itself, not the `extern crate` item.
+            if let Some(local_did) = did.as_local() {
+                tcx.extern_mod_stmt_cnum(local_did).unwrap_or(LOCAL_CRATE).as_def_id()
+            } else {
+                did
+            }
+        }
         _ => did,
     };
     let cache = cx.cache();
@@ -1094,22 +1102,35 @@ fn fmt_type<'cx>(
             };
             let m = mutability.print_with_space();
             let amp = if f.alternate() { "&" } else { "&amp;" };
-            match **ty {
+
+            if let clean::Generic(name) = **ty {
+                return primitive_link(
+                    f,
+                    PrimitiveType::Reference,
+                    &format!("{amp}{lt}{m}{name}"),
+                    cx,
+                );
+            }
+
+            write!(f, "{amp}{lt}{m}")?;
+
+            let needs_parens = match **ty {
                 clean::DynTrait(ref bounds, ref trait_lt)
                     if bounds.len() > 1 || trait_lt.is_some() =>
                 {
-                    write!(f, "{}{}{}(", amp, lt, m)?;
-                    fmt_type(ty, f, use_absolute, cx)?;
-                    write!(f, ")")
+                    true
                 }
-                clean::Generic(name) => {
-                    primitive_link(f, PrimitiveType::Reference, &format!("{amp}{lt}{m}{name}"), cx)
-                }
-                _ => {
-                    write!(f, "{}{}{}", amp, lt, m)?;
-                    fmt_type(ty, f, use_absolute, cx)
-                }
+                clean::ImplTrait(ref bounds) if bounds.len() > 1 => true,
+                _ => false,
+            };
+            if needs_parens {
+                f.write_str("(")?;
             }
+            fmt_type(ty, f, use_absolute, cx)?;
+            if needs_parens {
+                f.write_str(")")?;
+            }
+            Ok(())
         }
         clean::ImplTrait(ref bounds) => {
             if f.alternate() {

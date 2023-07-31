@@ -1,13 +1,12 @@
 use clippy_utils::diagnostics::{span_lint_and_help, span_lint_and_note, span_lint_and_sugg, span_lint_and_then};
-use clippy_utils::paths;
 use clippy_utils::ty::{implements_trait, implements_trait_with_env, is_copy};
-use clippy_utils::{is_lint_allowed, match_def_path};
+use clippy_utils::{is_lint_allowed, match_def_path, paths};
 use if_chain::if_chain;
 use rustc_errors::Applicability;
 use rustc_hir::def_id::DefId;
 use rustc_hir::intravisit::{walk_expr, walk_fn, walk_item, FnKind, Visitor};
 use rustc_hir::{
-    self as hir, BlockCheckMode, BodyId, Constness, Expr, ExprKind, FnDecl, Impl, Item, ItemKind, UnsafeSource,
+    self as hir, BlockCheckMode, BodyId, Expr, ExprKind, FnDecl, Impl, Item, ItemKind, UnsafeSource,
     Unsafety,
 };
 use rustc_lint::{LateContext, LateLintPass};
@@ -334,7 +333,9 @@ fn check_copy_clone<'tcx>(cx: &LateContext<'tcx>, item: &Item<'_>, trait_ref: &h
         Some(id) if trait_ref.trait_def_id() == Some(id) => id,
         _ => return,
     };
-    let Some(copy_id) = cx.tcx.lang_items().copy_trait() else { return };
+    let Some(copy_id) = cx.tcx.lang_items().copy_trait() else {
+        return;
+    };
     let (ty_adt, ty_subs) = match *ty.kind() {
         // Unions can't derive clone.
         ty::Adt(adt, subs) if !adt.is_union() => (adt, subs),
@@ -525,6 +526,5 @@ fn param_env_for_derived_eq(tcx: TyCtxt<'_>, did: DefId, eq_trait_id: DefId) -> 
             }),
         )),
         Reveal::UserFacing,
-        Constness::NotConst,
     )
 }

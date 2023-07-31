@@ -4,7 +4,6 @@ use super::check_args_compatible;
 use super::specialization_graph;
 use super::translate_args;
 use super::util;
-use super::ImplSourceUserDefinedData;
 use super::MismatchedProjectionTypes;
 use super::Obligation;
 use super::ObligationCause;
@@ -13,6 +12,9 @@ use super::Selection;
 use super::SelectionContext;
 use super::SelectionError;
 use super::{Normalized, NormalizedTy, ProjectionCacheEntry, ProjectionCacheKey};
+use rustc_middle::traits::BuiltinImplSource;
+use rustc_middle::traits::ImplSource;
+use rustc_middle::traits::ImplSourceUserDefinedData;
 
 use crate::errors::InherentProjectionNormalizationOverflow;
 use crate::infer::type_variable::{TypeVariableOrigin, TypeVariableOriginKind};
@@ -481,8 +483,7 @@ impl<'a, 'b, 'tcx> AssocTypeNormalizer<'a, 'b, 'tcx> {
 
         assert!(
             !value.has_escaping_bound_vars(),
-            "Normalizing {:?} without wrapping in a `Binder`",
-            value
+            "Normalizing {value:?} without wrapping in a `Binder`"
         );
 
         if !needs_normalization(&value, self.param_env.reveal()) {
@@ -1717,7 +1718,7 @@ fn assemble_candidates_from_impls<'cx, 'tcx>(
         };
 
         let eligible = match &impl_source {
-            super::ImplSource::UserDefined(impl_data) => {
+            ImplSource::UserDefined(impl_data) => {
                 // We have to be careful when projecting out of an
                 // impl because of specialization. If we are not in
                 // codegen (i.e., projection mode is not "any"), and the
@@ -1767,7 +1768,7 @@ fn assemble_candidates_from_impls<'cx, 'tcx>(
                     }
                 }
             }
-            super::ImplSource::Builtin(..) => {
+            ImplSource::Builtin(BuiltinImplSource::Misc, _) => {
                 // While a builtin impl may be known to exist, the associated type may not yet
                 // be known. Any type with multiple potential associated types is therefore
                 // not eligible.
@@ -1891,7 +1892,7 @@ fn assemble_candidates_from_impls<'cx, 'tcx>(
                     bug!("unexpected builtin trait with associated type: {trait_ref:?}")
                 }
             }
-            super::ImplSource::Param(..) => {
+            ImplSource::Param(..) => {
                 // This case tell us nothing about the value of an
                 // associated type. Consider:
                 //
@@ -1919,17 +1920,18 @@ fn assemble_candidates_from_impls<'cx, 'tcx>(
                 // in `assemble_candidates_from_param_env`.
                 false
             }
-            super::ImplSource::Object(_) => {
+            ImplSource::Builtin(BuiltinImplSource::Object { .. }, _) => {
                 // Handled by the `Object` projection candidate. See
                 // `assemble_candidates_from_object_ty` for an explanation of
                 // why we special case object types.
                 false
             }
-            | super::ImplSource::TraitUpcasting(_) => {
+            ImplSource::Builtin(BuiltinImplSource::TraitUpcasting { .. }, _)
+            | ImplSource::Builtin(BuiltinImplSource::TupleUnsizing, _) => {
                 // These traits have no associated types.
                 selcx.tcx().sess.delay_span_bug(
                     obligation.cause.span,
-                    format!("Cannot project an associated type from `{:?}`", impl_source),
+                    format!("Cannot project an associated type from `{impl_source:?}`"),
                 );
                 return Err(());
             }
@@ -1985,8 +1987,8 @@ fn confirm_select_candidate<'cx, 'tcx>(
     impl_source: Selection<'tcx>,
 ) -> Progress<'tcx> {
     match impl_source {
-        super::ImplSource::UserDefined(data) => confirm_impl_candidate(selcx, obligation, data),
-        super::ImplSource::Builtin(data) => {
+        ImplSource::UserDefined(data) => confirm_impl_candidate(selcx, obligation, data),
+        ImplSource::Builtin(BuiltinImplSource::Misc, data) => {
             let trait_def_id = obligation.predicate.trait_def_id(selcx.tcx());
             let lang_items = selcx.tcx().lang_items();
             if lang_items.gen_trait() == Some(trait_def_id) {
@@ -2003,9 +2005,10 @@ fn confirm_select_candidate<'cx, 'tcx>(
                 confirm_builtin_candidate(selcx, obligation, data)
             }
         }
-        super::ImplSource::Object(_)
-        | super::ImplSource::Param(..)
-        | super::ImplSource::TraitUpcasting(_) => {
+        ImplSource::Builtin(BuiltinImplSource::Object { .. }, _)
+        | ImplSource::Param(..)
+        | ImplSource::Builtin(BuiltinImplSource::TraitUpcasting { .. }, _)
+        | ImplSource::Builtin(BuiltinImplSource::TupleUnsizing, _) => {
             // we don't create Select candidates with this kind of resolution
             span_bug!(
                 obligation.cause.span,
@@ -2299,8 +2302,7 @@ fn confirm_param_env_candidate<'cx, 'tcx>(
         }
         Err(e) => {
             let msg = format!(
-                "Failed to unify obligation `{:?}` with poly_projection `{:?}`: {:?}",
-                obligation, poly_cache_entry, e,
+                "Failed to unify obligation `{obligation:?}` with poly_projection `{poly_cache_entry:?}`: {e:?}",
             );
             debug!("confirm_param_env_candidate: {}", msg);
             let err = Ty::new_error_with_message(infcx.tcx, obligation.cause.span, msg);

@@ -402,7 +402,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                             .sess
                             .struct_span_err(
                                 callee_expr.span,
-                                format!("evaluate({:?}) = {:?}", predicate, result),
+                                format!("evaluate({predicate:?}) = {result:?}"),
                             )
                             .span_label(predicate_span, "predicate")
                             .emit();
@@ -531,8 +531,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 return;
             }
 
-            let up_to_rcvr_span = segment.ident.span.until(callee_expr.span);
-            let rest_span = callee_expr.span.shrink_to_hi().to(call_expr.span.shrink_to_hi());
+            let Some(callee_expr_span) = callee_expr.span.find_ancestor_inside(call_expr.span)
+            else {
+                return;
+            };
+            let up_to_rcvr_span = segment.ident.span.until(callee_expr_span);
+            let rest_span = callee_expr_span.shrink_to_hi().to(call_expr.span.shrink_to_hi());
             let rest_snippet = if let Some(first) = rest.first() {
                 self.tcx
                     .sess
@@ -581,6 +585,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         callee_ty: Ty<'tcx>,
         arg_exprs: &'tcx [hir::Expr<'tcx>],
     ) -> ErrorGuaranteed {
+        // Callee probe fails when APIT references errors, so suppress those
+        // errors here.
+        if let Some((_, _, args)) = self.extract_callable_info(callee_ty)
+            && let Err(err) = args.error_reported()
+        {
+            return err;
+        }
+
         let mut unit_variant = None;
         if let hir::ExprKind::Path(qpath) = &callee_expr.kind
             && let Res::Def(def::DefKind::Ctor(kind, CtorKind::Const), _)

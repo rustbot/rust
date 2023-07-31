@@ -1817,8 +1817,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 }
 
                 ProjectionElem::Subslice { .. } => {
-                    panic!("we don't allow assignments to subslices, location: {:?}",
-                           location);
+                    panic!("we don't allow assignments to subslices, location: {location:?}");
                 }
 
                 ProjectionElem::Field(..) => {
@@ -2017,8 +2016,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                     self.infcx.tcx.sess.delay_span_bug(
                         span,
                         format!(
-                            "Accessing `{:?}` with the kind `{:?}` shouldn't be possible",
-                            place, kind,
+                            "Accessing `{place:?}` with the kind `{kind:?}` shouldn't be possible",
                         ),
                     );
                 }
@@ -2306,11 +2304,10 @@ mod error {
 
         pub fn buffer_error(&mut self, t: DiagnosticBuilder<'_, ErrorGuaranteed>) {
             if let None = self.tainted_by_errors {
-                self.tainted_by_errors = Some(
-                    self.tcx
-                        .sess
-                        .delay_span_bug(t.span.clone(), "diagnostic buffered but not emitted"),
-                )
+                self.tainted_by_errors = Some(self.tcx.sess.delay_span_bug(
+                    t.span.clone_ignoring_labels(),
+                    "diagnostic buffered but not emitted",
+                ))
             }
             t.buffer(&mut self.buffered);
         }

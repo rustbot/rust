@@ -36,10 +36,9 @@ use once_cell::sync::OnceCell;
 use crate::builder::Kind;
 use crate::config::{LlvmLibunwind, TargetSelection};
 use crate::util::{
-    exe, libdir, mtime, output, run, run_suppressed, symlink_dir, try_run_suppressed,
+    dir_is_empty, exe, libdir, mtime, output, run, run_suppressed, symlink_dir, try_run_suppressed,
 };
 
-mod bolt;
 mod builder;
 mod cache;
 mod cc_detect;
@@ -131,9 +130,16 @@ const EXTRA_CHECK_CFGS: &[(Option<Mode>, &'static str, Option<&[&'static str]>)]
     (Some(Mode::Std), "freebsd13", None),
     (Some(Mode::Std), "backtrace_in_libstd", None),
     /* Extra values not defined in the built-in targets yet, but used in std */
+    // #[cfg(bootstrap)]
+    (Some(Mode::Std), "target_vendor", Some(&["unikraft"])),
     (Some(Mode::Std), "target_env", Some(&["libnx"])),
     // (Some(Mode::Std), "target_os", Some(&[])),
-    (Some(Mode::Std), "target_arch", Some(&["asmjs", "spirv", "nvptx", "xtensa"])),
+    // #[cfg(bootstrap)] mips32r6, mips64r6
+    (
+        Some(Mode::Std),
+        "target_arch",
+        Some(&["asmjs", "spirv", "nvptx", "xtensa", "mips32r6", "mips64r6"]),
+    ),
     /* Extra names used by dependencies */
     // FIXME: Used by serde_json, but we should not be triggering on external dependencies.
     (Some(Mode::Rustc), "no_btreemap_remove_entry", None),
@@ -477,7 +483,7 @@ impl Build {
             .unwrap()
             .trim();
         if local_release.split('.').take(2).eq(version.split('.').take(2)) {
-            build.verbose(&format!("auto-detected local-rebuild {}", local_release));
+            build.verbose(&format!("auto-detected local-rebuild {local_release}"));
             build.local_rebuild = true;
         }
 
@@ -530,10 +536,6 @@ impl Build {
     ///
     /// `relative_path` should be relative to the root of the git repository, not an absolute path.
     pub(crate) fn update_submodule(&self, relative_path: &Path) {
-        fn dir_is_empty(dir: &Path) -> bool {
-            t!(std::fs::read_dir(dir)).next().is_none()
-        }
-
         if !self.config.submodules(&self.rust_info()) {
             return;
         }
@@ -710,7 +712,7 @@ impl Build {
         if failures.len() > 0 {
             eprintln!("\n{} command(s) did not execute successfully:\n", failures.len());
             for failure in failures.iter() {
-                eprintln!("  - {}\n", failure);
+                eprintln!("  - {failure}\n");
             }
             exit!(1);
         }
@@ -956,7 +958,7 @@ impl Build {
         if self.config.dry_run() {
             return;
         }
-        self.verbose(&format!("running: {:?}", cmd));
+        self.verbose(&format!("running: {cmd:?}"));
         run(cmd, self.is_verbose())
     }
 
@@ -965,7 +967,7 @@ impl Build {
         if self.config.dry_run() {
             return;
         }
-        self.verbose(&format!("running: {:?}", cmd));
+        self.verbose(&format!("running: {cmd:?}"));
         run_suppressed(cmd)
     }
 
@@ -977,10 +979,10 @@ impl Build {
             return true;
         }
         if !self.fail_fast {
-            self.verbose(&format!("running: {:?}", cmd));
+            self.verbose(&format!("running: {cmd:?}"));
             if !try_run_suppressed(cmd) {
                 let mut failures = self.delayed_failures.borrow_mut();
-                failures.push(format!("{:?}", cmd));
+                failures.push(format!("{cmd:?}"));
                 return false;
             }
         } else {
@@ -995,7 +997,7 @@ impl Build {
             #[allow(deprecated)] // can't use Build::try_run, that's us
             if self.config.try_run(cmd).is_err() {
                 let mut failures = self.delayed_failures.borrow_mut();
-                failures.push(format!("{:?}", cmd));
+                failures.push(format!("{cmd:?}"));
                 return false;
             }
         } else {
@@ -1011,7 +1013,7 @@ impl Build {
     /// Prints a message if this build is configured in more verbose mode than `level`.
     fn verbose_than(&self, level: usize, msg: &str) {
         if self.is_verbose_than(level) {
-            println!("{}", msg);
+            println!("{msg}");
         }
     }
 
@@ -1019,7 +1021,7 @@ impl Build {
         match self.config.dry_run {
             DryRun::SelfCheck => return,
             DryRun::Disabled | DryRun::UserSelected => {
-                println!("{}", msg);
+                println!("{msg}");
             }
         }
     }
@@ -1144,7 +1146,7 @@ impl Build {
         match which {
             GitRepo::Rustc => {
                 let sha = self.rust_sha().unwrap_or(&self.version);
-                Some(format!("/rustc/{}", sha))
+                Some(format!("/rustc/{sha}"))
             }
             GitRepo::Llvm => Some(String::from("/rustc/llvm")),
         }
@@ -1197,10 +1199,10 @@ impl Build {
             let map = format!("{}={}", self.src.display(), map_to);
             let cc = self.cc(target);
             if cc.ends_with("clang") || cc.ends_with("gcc") {
-                base.push(format!("-fdebug-prefix-map={}", map));
+                base.push(format!("-fdebug-prefix-map={map}"));
             } else if cc.ends_with("clang-cl.exe") {
                 base.push("-Xclang".into());
-                base.push(format!("-fdebug-prefix-map={}", map));
+                base.push(format!("-fdebug-prefix-map={map}"));
             }
         }
         base
@@ -1229,9 +1231,7 @@ impl Build {
         }
         match self.cxx.borrow().get(&target) {
             Some(p) => Ok(p.path().into()),
-            None => {
-                Err(format!("target `{}` is not configured as a host, only as a target", target))
-            }
+            None => Err(format!("target `{target}` is not configured as a host, only as a target")),
         }
     }
 
@@ -1274,7 +1274,7 @@ impl Build {
             }
 
             let no_threads = util::lld_flag_no_threads(target.contains("windows"));
-            options[1] = Some(format!("-Clink-arg=-Wl,{}", no_threads));
+            options[1] = Some(format!("-Clink-arg=-Wl,{no_threads}"));
         }
 
         IntoIterator::into_iter(options).flatten()
@@ -1401,11 +1401,11 @@ impl Build {
                 if !self.config.omit_git_hash {
                     format!("{}-beta.{}", num, self.beta_prerelease_version())
                 } else {
-                    format!("{}-beta", num)
+                    format!("{num}-beta")
                 }
             }
-            "nightly" => format!("{}-nightly", num),
-            _ => format!("{}-dev", num),
+            "nightly" => format!("{num}-nightly"),
+            _ => format!("{num}-dev"),
         }
     }
 
@@ -1453,7 +1453,7 @@ impl Build {
             "stable" => num.to_string(),
             "beta" => "beta".to_string(),
             "nightly" => "nightly".to_string(),
-            _ => format!("{}-dev", num),
+            _ => format!("{num}-dev"),
         }
     }
 
@@ -1484,7 +1484,7 @@ impl Build {
 
     /// Returns the `a.b.c` version that the given package is at.
     fn release_num(&self, package: &str) -> String {
-        let toml_file_name = self.src.join(&format!("src/tools/{}/Cargo.toml", package));
+        let toml_file_name = self.src.join(&format!("src/tools/{package}/Cargo.toml"));
         let toml = t!(fs::read_to_string(&toml_file_name));
         for line in toml.lines() {
             if let Some(stripped) =
@@ -1494,7 +1494,7 @@ impl Build {
             }
         }
 
-        panic!("failed to find version in {}'s Cargo.toml", package)
+        panic!("failed to find version in {package}'s Cargo.toml")
     }
 
     /// Returns `true` if unstable features should be enabled for the compiler
@@ -1586,7 +1586,7 @@ impl Build {
         if self.config.dry_run() {
             return;
         }
-        self.verbose_than(1, &format!("Copy {:?} to {:?}", src, dst));
+        self.verbose_than(1, &format!("Copy {src:?} to {dst:?}"));
         if src == dst {
             return;
         }
@@ -1677,7 +1677,7 @@ impl Build {
             return;
         }
         let dst = dstdir.join(src.file_name().unwrap());
-        self.verbose_than(1, &format!("Install {:?} to {:?}", src, dst));
+        self.verbose_than(1, &format!("Install {src:?} to {dst:?}"));
         t!(fs::create_dir_all(dstdir));
         if !src.exists() {
             panic!("Error: File \"{}\" not found!", src.display());
@@ -1711,7 +1711,7 @@ impl Build {
         let iter = match fs::read_dir(dir) {
             Ok(v) => v,
             Err(_) if self.config.dry_run() => return vec![].into_iter(),
-            Err(err) => panic!("could not read dir {:?}: {:?}", dir, err),
+            Err(err) => panic!("could not read dir {dir:?}: {err:?}"),
         };
         iter.map(|e| t!(e)).collect::<Vec<_>>().into_iter()
     }

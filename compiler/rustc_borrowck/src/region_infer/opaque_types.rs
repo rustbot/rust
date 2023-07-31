@@ -339,8 +339,8 @@ fn check_opaque_type_well_formed<'tcx>(
     // version.
     let errors = ocx.select_all_or_error();
 
-    // This is still required for many(half of the tests in ui/type-alias-impl-trait)
-    // tests to pass
+    // This is fishy, but we check it again in `check_opaque_meets_bounds`.
+    // Remove once we can prepopulate with known hidden types.
     let _ = infcx.take_opaque_types();
 
     if errors.is_empty() {
@@ -419,7 +419,7 @@ fn check_opaque_type_parameter_valid(
             return Err(tcx
                 .sess
                 .struct_span_err(span, "non-defining opaque type use in defining scope")
-                .span_note(spans, format!("{} used multiple times", descr))
+                .span_note(spans, format!("{descr} used multiple times"))
                 .emit());
         }
     }

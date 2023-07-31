@@ -2353,7 +2353,12 @@ impl Param {
     /// Builds a `Param` object from `ExplicitSelf`.
     pub fn from_self(attrs: AttrVec, eself: ExplicitSelf, eself_ident: Ident) -> Param {
         let span = eself.span.to(eself_ident.span);
-        let infer_ty = P(Ty { id: DUMMY_NODE_ID, kind: TyKind::ImplicitSelf, span, tokens: None });
+        let infer_ty = P(Ty {
+            id: DUMMY_NODE_ID,
+            kind: TyKind::ImplicitSelf,
+            span: eself_ident.span,
+            tokens: None,
+        });
         let (mutbl, ty) = match eself.node {
             SelfKind::Explicit(ty, mutbl) => (mutbl, ty),
             SelfKind::Value(mutbl) => (mutbl, infer_ty),
@@ -2942,6 +2947,7 @@ pub struct StaticItem {
 #[derive(Clone, Encodable, Decodable, Debug)]
 pub struct ConstItem {
     pub defaultness: Defaultness,
+    pub generics: Generics,
     pub ty: P<Ty>,
     pub expr: Option<P<Expr>>,
 }
@@ -3053,6 +3059,7 @@ impl ItemKind {
         match self {
             Self::Fn(box Fn { generics, .. })
             | Self::TyAlias(box TyAlias { generics, .. })
+            | Self::Const(box ConstItem { generics, .. })
             | Self::Enum(_, generics)
             | Self::Struct(_, generics)
             | Self::Union(_, generics)

@@ -17,6 +17,7 @@ use rustc_hir::LangItem;
 use rustc_session::config::TrimmedDefPaths;
 use rustc_session::cstore::{ExternCrate, ExternCrateSource};
 use rustc_session::Limit;
+use rustc_span::sym;
 use rustc_span::symbol::{kw, Ident, Symbol};
 use rustc_span::FileNameDisplayPreference;
 use rustc_target::abi::Size;
@@ -928,7 +929,7 @@ pub trait PrettyPrinter<'tcx>:
         let mut is_sized = false;
         let mut lifetimes = SmallVec::<[ty::Region<'tcx>; 1]>::new();
 
-        for (predicate, _) in bounds.arg_iter_copied(tcx, args) {
+        for (predicate, _) in bounds.iter_instantiated_copied(tcx, args) {
             let bound_predicate = predicate.kind();
 
             match bound_predicate.skip_binder() {
@@ -1497,7 +1498,7 @@ pub trait PrettyPrinter<'tcx>:
                 let data = int.assert_bits(self.tcx().data_layout.pointer_size);
                 self = self.typed_value(
                     |mut this| {
-                        write!(this, "0x{:x}", data)?;
+                        write!(this, "0x{data:x}")?;
                         Ok(this)
                     },
                     |this| this.print_type(ty),
@@ -1510,7 +1511,7 @@ pub trait PrettyPrinter<'tcx>:
                     if int.size() == Size::ZERO {
                         write!(this, "transmute(())")?;
                     } else {
-                        write!(this, "transmute(0x{:x})", int)?;
+                        write!(this, "transmute(0x{int:x})")?;
                     }
                     Ok(this)
                 };
@@ -1932,7 +1933,7 @@ impl<'tcx> Printer<'tcx> for FmtPrinter<'_, 'tcx> {
     fn path_crate(mut self, cnum: CrateNum) -> Result<Self::Path, Self::Error> {
         self.empty_path = true;
         if cnum == LOCAL_CRATE {
-            if self.tcx.sess.rust_2018() {
+            if self.tcx.sess.at_least_rust_2018() {
                 // We add the `crate::` keyword on Rust 2018, only when desired.
                 if SHOULD_PREFIX_WITH_CRATE.with(|flag| flag.get()) {
                     write!(self, "{}", kw::Crate)?;
@@ -2017,11 +2018,37 @@ impl<'tcx> Printer<'tcx> for FmtPrinter<'_, 'tcx> {
     ) -> Result<Self::Path, Self::Error> {
         self = print_prefix(self)?;
 
-        if args.first().is_some() {
+        let tcx = self.tcx;
+
+        let args = args.iter().copied();
+
+        let args: Vec<_> = if !tcx.sess.verbose() {
+            // skip host param as those are printed as `~const`
+            args.filter(|arg| match arg.unpack() {
+                // FIXME(effects) there should be a better way than just matching the name
+                GenericArgKind::Const(c)
+                    if tcx.features().effects
+                        && matches!(
+                            c.kind(),
+                            ty::ConstKind::Param(ty::ParamConst { name: sym::host, .. })
+                        ) =>
+                {
+                    false
+                }
+                _ => true,
+            })
+            .collect()
+        } else {
+            // If -Zverbose is passed, we should print the host parameter instead
+            // of eating it.
+            args.collect()
+        };
+
+        if !args.is_empty() {
             if self.in_value {
                 write!(self, "::")?;
             }
-            self.generic_delimiters(|cx| cx.comma_sep(args.iter().cloned()))
+            self.generic_delimiters(|cx| cx.comma_sep(args.into_iter()))
         } else {
             Ok(self)
         }
@@ -2348,10 +2375,10 @@ impl<'tcx> FmtPrinter<'_, 'tcx> {
             } else {
                 cont
             };
-            let _ = write!(cx, "{}", w);
+            let _ = write!(cx, "{w}");
         };
         let do_continue = |cx: &mut Self, cont: Symbol| {
-            let _ = write!(cx, "{}", cont);
+            let _ = write!(cx, "{cont}");
         };
 
         define_scoped_cx!(self);
@@ -2387,7 +2414,7 @@ impl<'tcx> FmtPrinter<'_, 'tcx> {
         let (new_value, map) = if self.should_print_verbose() {
             for var in value.bound_vars().iter() {
                 start_or_continue(&mut self, "for<", ", ");
-                write!(self, "{:?}", var)?;
+                write!(self, "{var:?}")?;
             }
             start_or_continue(&mut self, "", "> ");
             (value.clone().skip_binder(), BTreeMap::default())

@@ -38,6 +38,7 @@ use rustc_span::symbol::sym;
 use rustc_span::Symbol;
 use rustc_target::abi::{Align, FIRST_VARIANT};
 
+use std::cmp;
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
@@ -663,9 +664,16 @@ pub fn codegen_crate<B: ExtraBackendMethods>(
             )
         });
 
-        ongoing_codegen.submit_pre_codegened_module_to_llvm(
-            tcx,
+        ongoing_codegen.wait_for_signal_to_codegen_item();
+        ongoing_codegen.check_for_errors(tcx.sess);
+
+        // These modules are generally cheap and won't throw off scheduling.
+        let cost = 0;
+        submit_codegened_module_to_llvm(
+            &backend,
+            &ongoing_codegen.coordinator.sender,
             ModuleCodegen { name: llmod_id, module_llvm, kind: ModuleKind::Allocator },
+            cost,
         );
     }
 
@@ -682,10 +690,10 @@ pub fn codegen_crate<B: ExtraBackendMethods>(
     // are large size variations, this can reduce memory usage significantly.
     let codegen_units: Vec<_> = {
         let mut sorted_cgus = codegen_units.iter().collect::<Vec<_>>();
-        sorted_cgus.sort_by_cached_key(|cgu| cgu.size_estimate());
+        sorted_cgus.sort_by_key(|cgu| cmp::Reverse(cgu.size_estimate()));
 
         let (first_half, second_half) = sorted_cgus.split_at(sorted_cgus.len() / 2);
-        second_half.iter().rev().interleave(first_half).copied().collect()
+        first_half.iter().interleave(second_half.iter().rev()).copied().collect()
     };
 
     // Calculate the CGU reuse
@@ -760,7 +768,6 @@ pub fn codegen_crate<B: ExtraBackendMethods>(
                     module,
                     cost,
                 );
-                false
             }
             CguReuse::PreLto => {
                 submit_pre_lto_module_to_llvm(
@@ -772,7 +779,6 @@ pub fn codegen_crate<B: ExtraBackendMethods>(
                         source: cgu.previous_work_product(tcx),
                     },
                 );
-                true
             }
             CguReuse::PostLto => {
                 submit_post_lto_module_to_llvm(
@@ -783,9 +789,8 @@ pub fn codegen_crate<B: ExtraBackendMethods>(
                         source: cgu.previous_work_product(tcx),
                     },
                 );
-                true
             }
-        };
+        }
     }
 
     ongoing_codegen.codegen_finished(tcx);

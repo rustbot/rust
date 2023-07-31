@@ -352,7 +352,7 @@ fn emit_orphan_check_error<'tcx>(
 
                 let this = |name: &str| {
                     if !trait_ref.def_id.is_local() && !is_target_ty {
-                        msg("this", &format!(" because this is a foreign trait"))
+                        msg("this", " because this is a foreign trait")
                     } else {
                         msg("this", &format!(" because {name} are always foreign"))
                     }
@@ -412,9 +412,8 @@ fn emit_orphan_check_error<'tcx>(
                 .span_label(
                     sp,
                     format!(
-                        "type parameter `{}` must be covered by another type \
-                    when it appears before the first local type (`{}`)",
-                        param_ty, local_type
+                        "type parameter `{param_ty}` must be covered by another type \
+                    when it appears before the first local type (`{local_type}`)"
                     ),
                 )
                 .note(
@@ -441,9 +440,8 @@ fn emit_orphan_check_error<'tcx>(
                 .span_label(
                     sp,
                     format!(
-                        "type parameter `{}` must be used as the type parameter for some \
+                        "type parameter `{param_ty}` must be used as the type parameter for some \
                     local type",
-                        param_ty,
                     ),
                 )
                 .note(
@@ -541,17 +539,16 @@ fn lint_auto_trait_impl<'tcx>(
             let self_descr = tcx.def_descr(self_type_did);
             match arg {
                 ty::util::NotUniqueParam::DuplicateParam(arg) => {
-                    lint.note(format!("`{}` is mentioned multiple times", arg));
+                    lint.note(format!("`{arg}` is mentioned multiple times"));
                 }
                 ty::util::NotUniqueParam::NotParam(arg) => {
-                    lint.note(format!("`{}` is not a generic parameter", arg));
+                    lint.note(format!("`{arg}` is not a generic parameter"));
                 }
             }
             lint.span_note(
                 item_span,
                 format!(
-                    "try using the same sequence of generic parameters as the {} definition",
-                    self_descr,
+                    "try using the same sequence of generic parameters as the {self_descr} definition",
                 ),
             )
         },
@@ -568,10 +565,10 @@ fn fast_reject_auto_impl<'tcx>(tcx: TyCtxt<'tcx>, trait_def_id: DefId, self_ty: 
 
     impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for DisableAutoTraitVisitor<'tcx> {
         type BreakTy = ();
-        fn visit_ty(&mut self, t: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
+        fn visit_ty(&mut self, ty: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
             let tcx = self.tcx;
-            if t != self.self_ty_root {
-                for impl_def_id in tcx.non_blanket_impls_for_ty(self.trait_def_id, t) {
+            if ty != self.self_ty_root {
+                for impl_def_id in tcx.non_blanket_impls_for_ty(self.trait_def_id, ty) {
                     match tcx.impl_polarity(impl_def_id) {
                         ImplPolarity::Negative => return ControlFlow::Break(()),
                         ImplPolarity::Reservation => {}
@@ -584,7 +581,7 @@ fn fast_reject_auto_impl<'tcx>(tcx: TyCtxt<'tcx>, trait_def_id: DefId, self_ty: 
                 }
             }
 
-            match t.kind() {
+            match ty.kind() {
                 ty::Adt(def, args) if def.is_phantom_data() => args.visit_with(self),
                 ty::Adt(def, args) => {
                     // @lcnr: This is the only place where cycles can happen. We avoid this
@@ -599,7 +596,7 @@ fn fast_reject_auto_impl<'tcx>(tcx: TyCtxt<'tcx>, trait_def_id: DefId, self_ty: 
 
                     ControlFlow::Continue(())
                 }
-                _ => t.super_visit_with(self),
+                _ => ty.super_visit_with(self),
             }
         }
     }

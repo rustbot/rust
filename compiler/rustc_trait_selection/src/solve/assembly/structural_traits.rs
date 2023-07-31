@@ -1,3 +1,5 @@
+//! Code which is used by built-in goals that match "structurally", such a auto
+//! traits, `Copy`/`Clone`.
 use rustc_data_structures::fx::FxHashMap;
 use rustc_hir::{def_id::DefId, Movability, Mutability};
 use rustc_infer::traits::query::NoSolution;
@@ -148,7 +150,7 @@ pub(in crate::solve) fn instantiate_constituent_tys_for_sized_trait<'tcx>(
 
         ty::Adt(def, args) => {
             let sized_crit = def.sized_constraint(ecx.tcx());
-            Ok(sized_crit.arg_iter_copied(ecx.tcx(), args).collect())
+            Ok(sized_crit.iter_instantiated_copied(ecx.tcx(), args).collect())
         }
     }
 }
@@ -353,7 +355,8 @@ pub(in crate::solve) fn predicates_for_object_candidate<'tcx>(
         // FIXME(associated_const_equality): Also add associated consts to
         // the requirements here.
         if item.kind == ty::AssocKind::Type {
-            requirements.extend(tcx.item_bounds(item.def_id).arg_iter(tcx, trait_ref.args));
+            requirements
+                .extend(tcx.item_bounds(item.def_id).iter_instantiated(tcx, trait_ref.args));
         }
     }
 

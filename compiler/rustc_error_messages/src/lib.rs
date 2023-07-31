@@ -71,17 +71,17 @@ pub enum TranslationBundleError {
 impl fmt::Display for TranslationBundleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TranslationBundleError::ReadFtl(e) => write!(f, "could not read ftl file: {}", e),
+            TranslationBundleError::ReadFtl(e) => write!(f, "could not read ftl file: {e}"),
             TranslationBundleError::ParseFtl(e) => {
-                write!(f, "could not parse ftl file: {}", e)
+                write!(f, "could not parse ftl file: {e}")
             }
-            TranslationBundleError::AddResource(e) => write!(f, "failed to add resource: {}", e),
+            TranslationBundleError::AddResource(e) => write!(f, "failed to add resource: {e}"),
             TranslationBundleError::MissingLocale => write!(f, "missing locale directory"),
             TranslationBundleError::ReadLocalesDir(e) => {
-                write!(f, "could not read locales dir: {}", e)
+                write!(f, "could not read locales dir: {e}")
             }
             TranslationBundleError::ReadLocalesDirEntry(e) => {
-                write!(f, "could not read locales dir entry: {}", e)
+                write!(f, "could not read locales dir entry: {e}")
             }
             TranslationBundleError::LocaleIsNotDir => {
                 write!(f, "`$sysroot/share/locales/$locale` is not a directory")
@@ -354,6 +354,13 @@ impl DiagnosticMessage {
             }
         }
     }
+
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            DiagnosticMessage::Eager(s) | DiagnosticMessage::Str(s) => Some(s),
+            DiagnosticMessage::FluentIdentifier(_, _) => None,
+        }
+    }
 }
 
 impl From<String> for DiagnosticMessage {
@@ -525,6 +532,14 @@ impl MultiSpan {
     /// Returns `true` if any of the span labels is displayable.
     pub fn has_span_labels(&self) -> bool {
         self.span_labels.iter().any(|(sp, _)| !sp.is_dummy())
+    }
+
+    /// Clone this `MultiSpan` without keeping any of the span labels - sometimes a `MultiSpan` is
+    /// to be re-used in another diagnostic, but includes `span_labels` which have translated
+    /// messages. These translated messages would fail to translate without their diagnostic
+    /// arguments which are unlikely to be cloned alongside the `Span`.
+    pub fn clone_ignoring_labels(&self) -> Self {
+        Self { primary_spans: self.primary_spans.clone(), ..MultiSpan::new() }
     }
 }
 

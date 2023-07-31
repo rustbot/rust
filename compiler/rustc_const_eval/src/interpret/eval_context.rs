@@ -958,7 +958,6 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
         } else {
             self.param_env
         };
-        let param_env = param_env.with_const();
         let val = self.ctfe_query(span, |tcx| tcx.eval_to_allocation_raw(param_env.and(gid)))?;
         self.raw_const_to_mplace(val)
     }
@@ -1014,9 +1013,12 @@ impl<'a, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> std::fmt::Debug
 {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.place {
-            Place::Local { frame, local } => {
+            Place::Local { frame, local, offset } => {
                 let mut allocs = Vec::new();
-                write!(fmt, "{:?}", local)?;
+                write!(fmt, "{local:?}")?;
+                if let Some(offset) = offset {
+                    write!(fmt, "+{:#x}", offset.bytes())?;
+                }
                 if frame != self.ecx.frame_idx() {
                     write!(fmt, " ({} frames up)", self.ecx.frame_idx() - frame)?;
                 }
@@ -1032,7 +1034,7 @@ impl<'a, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> std::fmt::Debug
                             fmt,
                             " by {} ref {:?}:",
                             match mplace.meta {
-                                MemPlaceMeta::Meta(meta) => format!(" meta({:?})", meta),
+                                MemPlaceMeta::Meta(meta) => format!(" meta({meta:?})"),
                                 MemPlaceMeta::None => String::new(),
                             },
                             mplace.ptr,
@@ -1040,13 +1042,13 @@ impl<'a, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> std::fmt::Debug
                         allocs.extend(mplace.ptr.provenance.map(Provenance::get_alloc_id));
                     }
                     LocalValue::Live(Operand::Immediate(Immediate::Scalar(val))) => {
-                        write!(fmt, " {:?}", val)?;
+                        write!(fmt, " {val:?}")?;
                         if let Scalar::Ptr(ptr, _size) = val {
                             allocs.push(ptr.provenance.get_alloc_id());
                         }
                     }
                     LocalValue::Live(Operand::Immediate(Immediate::ScalarPair(val1, val2))) => {
-                        write!(fmt, " ({:?}, {:?})", val1, val2)?;
+                        write!(fmt, " ({val1:?}, {val2:?})")?;
                         if let Scalar::Ptr(ptr, _size) = val1 {
                             allocs.push(ptr.provenance.get_alloc_id());
                         }
@@ -1062,7 +1064,7 @@ impl<'a, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> std::fmt::Debug
                 Some(alloc_id) => {
                     write!(fmt, "by ref {:?}: {:?}", mplace.ptr, self.ecx.dump_alloc(alloc_id))
                 }
-                ptr => write!(fmt, " integral by ref: {:?}", ptr),
+                ptr => write!(fmt, " integral by ref: {ptr:?}"),
             },
         }
     }

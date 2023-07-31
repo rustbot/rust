@@ -330,8 +330,7 @@ fn build_options<O: Default>(
                     match value {
                         None => handler.early_error(
                             format!(
-                                "{0} option `{1}` requires {2} ({3} {1}=<value>)",
-                                outputname, key, type_desc, prefix
+                                "{outputname} option `{key}` requires {type_desc} ({prefix} {key}=<value>)"
                             ),
                         ),
                         Some(value) => handler.early_error(
@@ -1145,7 +1144,7 @@ mod parse {
         }
 
         // 2. Parse a list of enabled and disabled components.
-        for comp in s.split(",") {
+        for comp in s.split(',') {
             if slot.handle_cli_component(comp).is_err() {
                 return false;
             }
@@ -1433,8 +1432,6 @@ options! {
     dep_tasks: bool = (false, parse_bool, [UNTRACKED],
         "print tasks that execute and the color their dep node gets (requires debug build) \
         (default: no)"),
-    diagnostic_width: Option<usize> = (None, parse_opt_number, [UNTRACKED],
-        "set the current output width for diagnostic truncation"),
     dont_buffer_diagnostics: bool = (false, parse_bool, [UNTRACKED],
         "emit diagnostics rather than buffering (breaks NLL error downgrading, sorting) \
         (default: no)"),
@@ -1668,6 +1665,9 @@ options! {
         "use a more precise version of drop elaboration for matches on enums (default: yes). \
         This results in better codegen, but has caused miscompilations on some tier 2 platforms. \
         See #77382 and #74551."),
+    #[rustc_lint_opt_deny_field_access("use `Session::print_codegen_stats` instead of this field")]
+    print_codegen_stats: bool = (false, parse_bool, [UNTRACKED],
+        "print codegen statistics (default: no)"),
     print_fuel: Option<String> = (None, parse_opt_string, [TRACKED],
         "make rustc print the total optimization fuel used by a crate"),
     print_llvm_passes: bool = (false, parse_bool, [UNTRACKED],
@@ -1875,10 +1875,13 @@ written to standard error output)"),
         Requires `-Clto[=[fat,yes]]`"),
     wasi_exec_model: Option<WasiExecModel> = (None, parse_wasi_exec_model, [TRACKED],
         "whether to build a wasi command or reactor"),
+    write_long_types_to_disk: bool = (true, parse_bool, [UNTRACKED],
+        "whether long type names should be written to files instead of being printed in errors"),
     // tidy-alphabetical-end
 
     // If you add a new option, please update:
     // - compiler/rustc_interface/src/tests.rs
+    // - src/doc/unstable-book/src/compiler-flags
 }
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]

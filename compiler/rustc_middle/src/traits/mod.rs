@@ -649,43 +649,31 @@ pub enum ImplSource<'tcx, N> {
     /// for some type parameter. The `Vec<N>` represents the
     /// obligations incurred from normalizing the where-clause (if
     /// any).
-    Param(Vec<N>, ty::BoundConstness),
+    Param(ty::BoundConstness, Vec<N>),
 
-    /// Virtual calls through an object.
-    Object(ImplSourceObjectData<N>),
-
-    /// Successful resolution for a builtin trait.
-    Builtin(Vec<N>),
-
-    /// ImplSource for trait upcasting coercion
-    TraitUpcasting(ImplSourceTraitUpcastingData<N>),
+    /// Successful resolution for a builtin impl.
+    Builtin(BuiltinImplSource, Vec<N>),
 }
 
 impl<'tcx, N> ImplSource<'tcx, N> {
     pub fn nested_obligations(self) -> Vec<N> {
         match self {
             ImplSource::UserDefined(i) => i.nested,
-            ImplSource::Param(n, _) | ImplSource::Builtin(n) => n,
-            ImplSource::Object(d) => d.nested,
-            ImplSource::TraitUpcasting(d) => d.nested,
+            ImplSource::Param(_, n) | ImplSource::Builtin(_, n) => n,
         }
     }
 
     pub fn borrow_nested_obligations(&self) -> &[N] {
         match self {
             ImplSource::UserDefined(i) => &i.nested,
-            ImplSource::Param(n, _) | ImplSource::Builtin(n) => &n,
-            ImplSource::Object(d) => &d.nested,
-            ImplSource::TraitUpcasting(d) => &d.nested,
+            ImplSource::Param(_, n) | ImplSource::Builtin(_, n) => &n,
         }
     }
 
     pub fn borrow_nested_obligations_mut(&mut self) -> &mut [N] {
         match self {
             ImplSource::UserDefined(i) => &mut i.nested,
-            ImplSource::Param(n, _) | ImplSource::Builtin(n) => n,
-            ImplSource::Object(d) => &mut d.nested,
-            ImplSource::TraitUpcasting(d) => &mut d.nested,
+            ImplSource::Param(_, n) | ImplSource::Builtin(_, n) => n,
         }
     }
 
@@ -699,17 +687,9 @@ impl<'tcx, N> ImplSource<'tcx, N> {
                 args: i.args,
                 nested: i.nested.into_iter().map(f).collect(),
             }),
-            ImplSource::Param(n, ct) => ImplSource::Param(n.into_iter().map(f).collect(), ct),
-            ImplSource::Builtin(n) => ImplSource::Builtin(n.into_iter().map(f).collect()),
-            ImplSource::Object(o) => ImplSource::Object(ImplSourceObjectData {
-                vtable_base: o.vtable_base,
-                nested: o.nested.into_iter().map(f).collect(),
-            }),
-            ImplSource::TraitUpcasting(d) => {
-                ImplSource::TraitUpcasting(ImplSourceTraitUpcastingData {
-                    vtable_vptr_slot: d.vtable_vptr_slot,
-                    nested: d.nested.into_iter().map(f).collect(),
-                })
+            ImplSource::Param(ct, n) => ImplSource::Param(ct, n.into_iter().map(f).collect()),
+            ImplSource::Builtin(source, n) => {
+                ImplSource::Builtin(source, n.into_iter().map(f).collect())
             }
         }
     }
@@ -733,29 +713,31 @@ pub struct ImplSourceUserDefinedData<'tcx, N> {
     pub nested: Vec<N>,
 }
 
-#[derive(Clone, PartialEq, Eq, TyEncodable, TyDecodable, HashStable, Lift)]
-#[derive(TypeFoldable, TypeVisitable)]
-pub struct ImplSourceTraitUpcastingData<N> {
-    /// The vtable is formed by concatenating together the method lists of
-    /// the base object trait and all supertraits, pointers to supertrait vtable will
-    /// be provided when necessary; this is the position of `upcast_trait_ref`'s vtable
-    /// within that vtable.
-    pub vtable_vptr_slot: Option<usize>,
-
-    pub nested: Vec<N>,
-}
-
-#[derive(PartialEq, Eq, Clone, TyEncodable, TyDecodable, HashStable, Lift)]
-#[derive(TypeFoldable, TypeVisitable)]
-pub struct ImplSourceObjectData<N> {
+#[derive(Copy, Clone, PartialEq, Eq, TyEncodable, TyDecodable, HashStable, Debug)]
+pub enum BuiltinImplSource {
+    /// Some builtin impl we don't need to differentiate. This should be used
+    /// unless more specific information is necessary.
+    Misc,
+    /// A builtin impl for trait objects.
+    ///
     /// The vtable is formed by concatenating together the method lists of
     /// the base object trait and all supertraits, pointers to supertrait vtable will
     /// be provided when necessary; this is the start of `upcast_trait_ref`'s methods
     /// in that vtable.
-    pub vtable_base: usize,
-
-    pub nested: Vec<N>,
+    Object { vtable_base: usize },
+    /// The vtable is formed by concatenating together the method lists of
+    /// the base object trait and all supertraits, pointers to supertrait vtable will
+    /// be provided when necessary; this is the position of `upcast_trait_ref`'s vtable
+    /// within that vtable.
+    TraitUpcasting { vtable_vptr_slot: Option<usize> },
+    /// Unsizing a tuple like `(A, B, ..., X)` to `(A, B, ..., Y)` if `X` unsizes to `Y`.
+    ///
+    /// This needs to be a separate variant as it is still unstable and we need to emit
+    /// a feature error when using it on stable.
+    TupleUnsizing,
 }
+
+TrivialTypeTraversalAndLiftImpls! { BuiltinImplSource }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, HashStable, PartialOrd, Ord)]
 pub enum ObjectSafetyViolation {
@@ -795,49 +777,48 @@ impl ObjectSafetyViolation {
                 "where clause cannot reference non-lifetime `for<...>` variables".into()
             }
             ObjectSafetyViolation::Method(name, MethodViolationCode::StaticMethod(_), _) => {
-                format!("associated function `{}` has no `self` parameter", name).into()
+                format!("associated function `{name}` has no `self` parameter").into()
             }
             ObjectSafetyViolation::Method(
                 name,
                 MethodViolationCode::ReferencesSelfInput(_),
                 DUMMY_SP,
-            ) => format!("method `{}` references the `Self` type in its parameters", name).into(),
+            ) => format!("method `{name}` references the `Self` type in its parameters").into(),
             ObjectSafetyViolation::Method(name, MethodViolationCode::ReferencesSelfInput(_), _) => {
-                format!("method `{}` references the `Self` type in this parameter", name).into()
+                format!("method `{name}` references the `Self` type in this parameter").into()
             }
             ObjectSafetyViolation::Method(name, MethodViolationCode::ReferencesSelfOutput, _) => {
-                format!("method `{}` references the `Self` type in its return type", name).into()
+                format!("method `{name}` references the `Self` type in its return type").into()
             }
             ObjectSafetyViolation::Method(
                 name,
                 MethodViolationCode::ReferencesImplTraitInTrait(_),
                 _,
-            ) => format!("method `{}` references an `impl Trait` type in its return type", name)
-                .into(),
+            ) => {
+                format!("method `{name}` references an `impl Trait` type in its return type").into()
+            }
             ObjectSafetyViolation::Method(name, MethodViolationCode::AsyncFn, _) => {
-                format!("method `{}` is `async`", name).into()
+                format!("method `{name}` is `async`").into()
             }
             ObjectSafetyViolation::Method(
                 name,
                 MethodViolationCode::WhereClauseReferencesSelf,
                 _,
-            ) => {
-                format!("method `{}` references the `Self` type in its `where` clause", name).into()
-            }
+            ) => format!("method `{name}` references the `Self` type in its `where` clause").into(),
             ObjectSafetyViolation::Method(name, MethodViolationCode::Generic, _) => {
-                format!("method `{}` has generic type parameters", name).into()
+                format!("method `{name}` has generic type parameters").into()
             }
             ObjectSafetyViolation::Method(
                 name,
                 MethodViolationCode::UndispatchableReceiver(_),
                 _,
-            ) => format!("method `{}`'s `self` parameter cannot be dispatched on", name).into(),
+            ) => format!("method `{name}`'s `self` parameter cannot be dispatched on").into(),
             ObjectSafetyViolation::AssocConst(name, DUMMY_SP) => {
-                format!("it contains associated `const` `{}`", name).into()
+                format!("it contains associated `const` `{name}`").into()
             }
             ObjectSafetyViolation::AssocConst(..) => "it contains this associated `const`".into(),
             ObjectSafetyViolation::GAT(name, _) => {
-                format!("it contains the generic associated type `{}`", name).into()
+                format!("it contains the generic associated type `{name}`").into()
             }
         }
     }
@@ -855,8 +836,7 @@ impl ObjectSafetyViolation {
                 err.span_suggestion(
                     add_self_sugg.1,
                     format!(
-                        "consider turning `{}` into a method by giving it a `&self` argument",
-                        name
+                        "consider turning `{name}` into a method by giving it a `&self` argument"
                     ),
                     add_self_sugg.0.to_string(),
                     Applicability::MaybeIncorrect,
@@ -864,9 +844,8 @@ impl ObjectSafetyViolation {
                 err.span_suggestion(
                     make_sized_sugg.1,
                     format!(
-                        "alternatively, consider constraining `{}` so it does not apply to \
-                             trait objects",
-                        name
+                        "alternatively, consider constraining `{name}` so it does not apply to \
+                             trait objects"
                     ),
                     make_sized_sugg.0.to_string(),
                     Applicability::MaybeIncorrect,
@@ -879,7 +858,7 @@ impl ObjectSafetyViolation {
             ) => {
                 err.span_suggestion(
                     *span,
-                    format!("consider changing method `{}`'s `self` parameter to be `&self`", name),
+                    format!("consider changing method `{name}`'s `self` parameter to be `&self`"),
                     "&Self",
                     Applicability::MachineApplicable,
                 );
@@ -887,7 +866,7 @@ impl ObjectSafetyViolation {
             ObjectSafetyViolation::AssocConst(name, _)
             | ObjectSafetyViolation::GAT(name, _)
             | ObjectSafetyViolation::Method(name, ..) => {
-                err.help(format!("consider moving `{}` to another trait", name));
+                err.help(format!("consider moving `{name}` to another trait"));
             }
         }
     }

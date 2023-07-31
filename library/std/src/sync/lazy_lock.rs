@@ -25,6 +25,8 @@ union Data<T, F> {
 ///
 /// # Examples
 ///
+/// Initialize static variables with `LazyLock`.
+///
 /// ```
 /// #![feature(lazy_cell)]
 ///
@@ -54,6 +56,24 @@ union Data<T, F> {
 ///     //   Some("Hoyten")
 /// }
 /// ```
+/// Initialize fields with `LazyLock`.
+/// ```
+/// #![feature(lazy_cell)]
+///
+/// use std::sync::LazyLock;
+///
+/// #[derive(Debug)]
+/// struct UseCellLock {
+///     number: LazyLock<u32>,
+/// }
+/// fn main() {
+///     let lock: LazyLock<u32> = LazyLock::new(|| 0u32);
+///
+///     let data = UseCellLock { number: lock };
+///     println!("{}", *data.number);
+/// }
+/// ```
+
 #[unstable(feature = "lazy_cell", issue = "109736")]
 pub struct LazyLock<T, F = fn() -> T> {
     once: Once,
@@ -67,6 +87,15 @@ impl<T, F: FnOnce() -> T> LazyLock<T, F> {
     #[unstable(feature = "lazy_cell", issue = "109736")]
     pub const fn new(f: F) -> LazyLock<T, F> {
         LazyLock { once: Once::new(), data: UnsafeCell::new(Data { f: ManuallyDrop::new(f) }) }
+    }
+
+    /// Creates a new lazy value that is already initialized.
+    #[inline]
+    #[cfg(test)]
+    pub(crate) fn preinit(value: T) -> LazyLock<T, F> {
+        let once = Once::new();
+        once.call_once(|| {});
+        LazyLock { once, data: UnsafeCell::new(Data { value: ManuallyDrop::new(value) }) }
     }
 
     /// Consumes this `LazyLock` returning the stored value.

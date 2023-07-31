@@ -246,6 +246,7 @@ provide! { tcx, def_id, other, cdata,
         debug_assert_eq!(tcx.def_kind(def_id), DefKind::OpaqueTy);
         cdata.root.tables.is_type_alias_impl_trait.get(cdata, def_id.index)
     }
+    assumed_wf_types_for_rpitit => { table }
     collect_return_position_impl_trait_in_trait_tys => {
         Ok(cdata
             .root
@@ -403,10 +404,8 @@ pub(in crate::rmeta) fn provide(providers: &mut Providers) {
                         .contains(&id)
                 })
         },
-        native_libraries: |tcx, LocalCrate| native_libs::collect(tcx),
-        foreign_modules: |tcx, LocalCrate| {
-            foreign_modules::collect(tcx).into_iter().map(|m| (m.def_id, m)).collect()
-        },
+        native_libraries: native_libs::collect,
+        foreign_modules: foreign_modules::collect,
 
         // Returns a map from a sufficiently visible external item (i.e., an
         // external item that is visible from at least one local module) to a

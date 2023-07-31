@@ -328,11 +328,7 @@ pub fn normalize_param_env_or_error<'tcx>(
 
     debug!("normalize_param_env_or_error: elaborated-predicates={:?}", predicates);
 
-    let elaborated_env = ty::ParamEnv::new(
-        tcx.mk_clauses(&predicates),
-        unnormalized_env.reveal(),
-        unnormalized_env.constness(),
-    );
+    let elaborated_env = ty::ParamEnv::new(tcx.mk_clauses(&predicates), unnormalized_env.reveal());
 
     // HACK: we are trying to normalize the param-env inside *itself*. The problem is that
     // normalization expects its param-env to be already normalized, which means we have
@@ -376,11 +372,8 @@ pub fn normalize_param_env_or_error<'tcx>(
     // here. I believe they should not matter, because we are ignoring TypeOutlives param-env
     // predicates here anyway. Keeping them here anyway because it seems safer.
     let outlives_env = non_outlives_predicates.iter().chain(&outlives_predicates).cloned();
-    let outlives_env = ty::ParamEnv::new(
-        tcx.mk_clauses_from_iter(outlives_env),
-        unnormalized_env.reveal(),
-        unnormalized_env.constness(),
-    );
+    let outlives_env =
+        ty::ParamEnv::new(tcx.mk_clauses_from_iter(outlives_env), unnormalized_env.reveal());
     let Ok(outlives_predicates) =
         do_normalize_predicates(tcx, cause, outlives_env, outlives_predicates)
     else {
@@ -393,11 +386,7 @@ pub fn normalize_param_env_or_error<'tcx>(
     let mut predicates = non_outlives_predicates;
     predicates.extend(outlives_predicates);
     debug!("normalize_param_env_or_error: final predicates={:?}", predicates);
-    ty::ParamEnv::new(
-        tcx.mk_clauses(&predicates),
-        unnormalized_env.reveal(),
-        unnormalized_env.constness(),
-    )
+    ty::ParamEnv::new(tcx.mk_clauses(&predicates), unnormalized_env.reveal())
 }
 
 /// Normalize a type and process all resulting obligations, returning any errors.
@@ -474,11 +463,14 @@ fn subst_and_check_impossible_predicates<'tcx>(
     result
 }
 
-/// Checks whether a trait's method is impossible to call on a given impl.
+/// Checks whether a trait's associated item is impossible to reference on a given impl.
 ///
 /// This only considers predicates that reference the impl's generics, and not
 /// those that reference the method's generics.
-fn is_impossible_method(tcx: TyCtxt<'_>, (impl_def_id, trait_item_def_id): (DefId, DefId)) -> bool {
+fn is_impossible_associated_item(
+    tcx: TyCtxt<'_>,
+    (impl_def_id, trait_item_def_id): (DefId, DefId),
+) -> bool {
     struct ReferencesOnlyParentGenerics<'tcx> {
         tcx: TyCtxt<'tcx>,
         generics: &'tcx ty::Generics,
@@ -556,7 +548,7 @@ pub fn provide(providers: &mut Providers) {
         specializes: specialize::specializes,
         subst_and_check_impossible_predicates,
         check_tys_might_be_eq: misc::check_tys_might_be_eq,
-        is_impossible_method,
+        is_impossible_associated_item,
         ..*providers
     };
 }

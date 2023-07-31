@@ -2664,10 +2664,19 @@ pub struct OpaqueTy<'hir> {
     pub generics: &'hir Generics<'hir>,
     pub bounds: GenericBounds<'hir>,
     pub origin: OpaqueTyOrigin,
-    // Opaques have duplicated lifetimes, this mapping connects the original lifetime with the copy
-    // so we can later generate bidirectional outlives predicates to enforce that these lifetimes
-    // stay in sync.
-    pub lifetime_mapping: &'hir [(Lifetime, LocalDefId)],
+    /// Return-position impl traits (and async futures) must "reify" any late-bound
+    /// lifetimes that are captured from the function signature they originate from.
+    ///
+    /// This is done by generating a new early-bound lifetime parameter local to the
+    /// opaque which is substituted in the function signature with the late-bound
+    /// lifetime.
+    ///
+    /// This mapping associated a captured lifetime (first parameter) with the new
+    /// early-bound lifetime that was generated for the opaque.
+    pub lifetime_mapping: Option<&'hir [(Lifetime, LocalDefId)]>,
+    /// Whether the opaque is a return-position impl trait (or async future)
+    /// originating from a trait method. This makes it so that the opaque is
+    /// lowered as an associated type.
     pub in_trait: bool,
 }
 
@@ -3004,8 +3013,7 @@ pub struct FieldDef<'hir> {
 impl FieldDef<'_> {
     // Still necessary in couple of places
     pub fn is_positional(&self) -> bool {
-        let first = self.ident.as_str().as_bytes()[0];
-        (b'0'..=b'9').contains(&first)
+        self.ident.as_str().as_bytes()[0].is_ascii_digit()
     }
 }
 
@@ -3122,9 +3130,9 @@ impl<'hir> Item<'hir> {
     }
     /// Expect an [`ItemKind::Const`] or panic.
     #[track_caller]
-    pub fn expect_const(&self) -> (&'hir Ty<'hir>, BodyId) {
-        let ItemKind::Const(ty, body) = self.kind else { self.expect_failed("a constant") };
-        (ty, body)
+    pub fn expect_const(&self) -> (&'hir Ty<'hir>, &'hir Generics<'hir>, BodyId) {
+        let ItemKind::Const(ty, gen, body) = self.kind else { self.expect_failed("a constant") };
+        (ty, gen, body)
     }
     /// Expect an [`ItemKind::Fn`] or panic.
     #[track_caller]
@@ -3311,7 +3319,7 @@ pub enum ItemKind<'hir> {
     /// A `static` item.
     Static(&'hir Ty<'hir>, Mutability, BodyId),
     /// A `const` item.
-    Const(&'hir Ty<'hir>, BodyId),
+    Const(&'hir Ty<'hir>, &'hir Generics<'hir>, BodyId),
     /// A function declaration.
     Fn(FnSig<'hir>, &'hir Generics<'hir>, BodyId),
     /// A MBE macro definition (`macro_rules!` or `macro`).
@@ -3364,6 +3372,7 @@ impl ItemKind<'_> {
         Some(match *self {
             ItemKind::Fn(_, ref generics, _)
             | ItemKind::TyAlias(_, ref generics)
+            | ItemKind::Const(_, ref generics, _)
             | ItemKind::OpaqueTy(OpaqueTy { ref generics, .. })
             | ItemKind::Enum(_, ref generics)
             | ItemKind::Struct(_, ref generics)
@@ -3559,7 +3568,9 @@ impl<'hir> OwnerNode<'hir> {
         match self {
             OwnerNode::Item(Item {
                 kind:
-                    ItemKind::Static(_, _, body) | ItemKind::Const(_, body) | ItemKind::Fn(_, _, body),
+                    ItemKind::Static(_, _, body)
+                    | ItemKind::Const(_, _, body)
+                    | ItemKind::Fn(_, _, body),
                 ..
             })
             | OwnerNode::TraitItem(TraitItem {
@@ -3762,9 +3773,9 @@ impl<'hir> Node<'hir> {
     pub fn ty(self) -> Option<&'hir Ty<'hir>> {
         match self {
             Node::Item(it) => match it.kind {
-                ItemKind::TyAlias(ty, _) | ItemKind::Static(ty, _, _) | ItemKind::Const(ty, _) => {
-                    Some(ty)
-                }
+                ItemKind::TyAlias(ty, _)
+                | ItemKind::Static(ty, _, _)
+                | ItemKind::Const(ty, _, _) => Some(ty),
                 _ => None,
             },
             Node::TraitItem(it) => match it.kind {
@@ -3792,7 +3803,9 @@ impl<'hir> Node<'hir> {
         match self {
             Node::Item(Item {
                 kind:
-                    ItemKind::Static(_, _, body) | ItemKind::Const(_, body) | ItemKind::Fn(_, _, body),
+                    ItemKind::Static(_, _, body)
+                    | ItemKind::Const(_, _, body)
+                    | ItemKind::Fn(_, _, body),
                 ..
             })
             | Node::TraitItem(TraitItem {

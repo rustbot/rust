@@ -15,11 +15,11 @@ struct Indentor<'a, 'b> {
 
 impl Write for Indentor<'_, '_> {
     fn write_str(&mut self, s: &str) -> std::fmt::Result {
-        for line in s.split_inclusive("\n") {
+        for line in s.split_inclusive('\n') {
             if self.on_newline {
                 self.f.write_str("    ")?;
             }
-            self.on_newline = line.ends_with("\n");
+            self.on_newline = line.ends_with('\n');
             self.f.write_str(line)?;
         }
 
@@ -68,7 +68,7 @@ impl<'a, 'b> ProofTreeFormatter<'a, 'b> {
             writeln!(self.f, "NESTED GOALS ADDED TO CALLER: [")?;
             self.nested(|this| {
                 for goal in goal.returned_goals.iter() {
-                    writeln!(this.f, "ADDED GOAL: {:?},", goal)?;
+                    writeln!(this.f, "ADDED GOAL: {goal:?},")?;
                 }
                 Ok(())
             })?;
@@ -100,8 +100,11 @@ impl<'a, 'b> ProofTreeFormatter<'a, 'b> {
             CandidateKind::NormalizedSelfTyAssembly => {
                 writeln!(self.f, "NORMALIZING SELF TY FOR ASSEMBLY:")
             }
+            CandidateKind::DynUpcastingAssembly => {
+                writeln!(self.f, "ASSEMBLING CANDIDATES FOR DYN UPCASTING:")
+            }
             CandidateKind::Candidate { name, result } => {
-                writeln!(self.f, "CANDIDATE {}: {:?}", name, result)
+                writeln!(self.f, "CANDIDATE {name}: {result:?}")
             }
         }?;
 

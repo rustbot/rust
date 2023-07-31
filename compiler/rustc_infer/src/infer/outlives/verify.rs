@@ -179,7 +179,7 @@ impl<'cx, 'tcx> VerifyBoundCx<'cx, 'tcx> {
                 // this point it never will be
                 self.tcx.sess.delay_span_bug(
                     rustc_span::DUMMY_SP,
-                    format!("unresolved inference variable in outlives: {:?}", v),
+                    format!("unresolved inference variable in outlives: {v:?}"),
                 );
                 // add a bound that never holds
                 VerifyBound::AnyBound(vec![])
@@ -295,7 +295,7 @@ impl<'cx, 'tcx> VerifyBoundCx<'cx, 'tcx> {
         let bounds = tcx.item_bounds(alias_ty.def_id);
         trace!("{:#?}", bounds.skip_binder());
         bounds
-            .arg_iter(tcx, alias_ty.args)
+            .iter_instantiated(tcx, alias_ty.args)
             .filter_map(|p| p.as_type_outlives_clause())
             .filter_map(|p| p.no_bound_vars())
             .map(|OutlivesPredicate(_, r)| r)

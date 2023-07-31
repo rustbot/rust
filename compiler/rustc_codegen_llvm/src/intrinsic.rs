@@ -230,22 +230,22 @@ impl<'ll, 'tcx> IntrinsicCallMethods<'tcx> for Builder<'_, 'll, 'tcx> {
                         sym::ctlz | sym::cttz => {
                             let y = self.const_bool(false);
                             self.call_intrinsic(
-                                &format!("llvm.{}.i{}", name, width),
+                                &format!("llvm.{name}.i{width}"),
                                 &[args[0].immediate(), y],
                             )
                         }
                         sym::ctlz_nonzero => {
                             let y = self.const_bool(true);
-                            let llvm_name = &format!("llvm.ctlz.i{}", width);
+                            let llvm_name = &format!("llvm.ctlz.i{width}");
                             self.call_intrinsic(llvm_name, &[args[0].immediate(), y])
                         }
                         sym::cttz_nonzero => {
                             let y = self.const_bool(true);
-                            let llvm_name = &format!("llvm.cttz.i{}", width);
+                            let llvm_name = &format!("llvm.cttz.i{width}");
                             self.call_intrinsic(llvm_name, &[args[0].immediate(), y])
                         }
                         sym::ctpop => self.call_intrinsic(
-                            &format!("llvm.ctpop.i{}", width),
+                            &format!("llvm.ctpop.i{width}"),
                             &[args[0].immediate()],
                         ),
                         sym::bswap => {
@@ -253,13 +253,13 @@ impl<'ll, 'tcx> IntrinsicCallMethods<'tcx> for Builder<'_, 'll, 'tcx> {
                                 args[0].immediate() // byte swap a u8/i8 is just a no-op
                             } else {
                                 self.call_intrinsic(
-                                    &format!("llvm.bswap.i{}", width),
+                                    &format!("llvm.bswap.i{width}"),
                                     &[args[0].immediate()],
                                 )
                             }
                         }
                         sym::bitreverse => self.call_intrinsic(
-                            &format!("llvm.bitreverse.i{}", width),
+                            &format!("llvm.bitreverse.i{width}"),
                             &[args[0].immediate()],
                         ),
                         sym::rotate_left | sym::rotate_right => {
@@ -1283,7 +1283,7 @@ fn generic_simd_intrinsic<'ll, 'tcx>(
             sym::simd_trunc => ("trunc", bx.type_func(&[vec_ty], vec_ty)),
             _ => return_error!(InvalidMonomorphization::UnrecognizedIntrinsic { span, name }),
         };
-        let llvm_name = &format!("llvm.{0}.v{1}{2}", intr_name, in_len, elem_ty_str);
+        let llvm_name = &format!("llvm.{intr_name}.v{in_len}{elem_ty_str}");
         let f = bx.declare_cfn(llvm_name, llvm::UnnamedAddr::No, fn_ty);
         let c = bx.call(
             fn_ty,
@@ -1498,7 +1498,7 @@ fn generic_simd_intrinsic<'ll, 'tcx>(
         let llvm_elem_vec_str = llvm_vector_str(underlying_ty, in_len, pointer_count - 1, bx);
 
         let llvm_intrinsic =
-            format!("llvm.masked.gather.{}.{}", llvm_elem_vec_str, llvm_pointer_vec_str);
+            format!("llvm.masked.gather.{llvm_elem_vec_str}.{llvm_pointer_vec_str}");
         let fn_ty = bx.type_func(
             &[llvm_pointer_vec_ty, alignment_ty, mask_ty, llvm_elem_vec_ty],
             llvm_elem_vec_ty,
@@ -1642,7 +1642,7 @@ fn generic_simd_intrinsic<'ll, 'tcx>(
         let llvm_elem_vec_str = llvm_vector_str(underlying_ty, in_len, pointer_count - 1, bx);
 
         let llvm_intrinsic =
-            format!("llvm.masked.scatter.{}.{}", llvm_elem_vec_str, llvm_pointer_vec_str);
+            format!("llvm.masked.scatter.{llvm_elem_vec_str}.{llvm_pointer_vec_str}");
         let fn_ty =
             bx.type_func(&[llvm_elem_vec_ty, llvm_pointer_vec_ty, alignment_ty, mask_ty], ret_t);
         let f = bx.declare_cfn(&llvm_intrinsic, llvm::UnnamedAddr::No, fn_ty);
@@ -2072,6 +2072,52 @@ fn generic_simd_intrinsic<'ll, 'tcx>(
     }
     arith_unary! {
         simd_neg: Int => neg, Float => fneg;
+    }
+
+    // Unary integer intrinsics
+    if matches!(name, sym::simd_bswap | sym::simd_bitreverse | sym::simd_ctlz | sym::simd_cttz) {
+        let vec_ty = bx.cx.type_vector(
+            match *in_elem.kind() {
+                ty::Int(i) => bx.cx.type_int_from_ty(i),
+                ty::Uint(i) => bx.cx.type_uint_from_ty(i),
+                _ => return_error!(InvalidMonomorphization::UnsupportedOperation {
+                    span,
+                    name,
+                    in_ty,
+                    in_elem
+                }),
+            },
+            in_len as u64,
+        );
+        let intrinsic_name = match name {
+            sym::simd_bswap => "bswap",
+            sym::simd_bitreverse => "bitreverse",
+            sym::simd_ctlz => "ctlz",
+            sym::simd_cttz => "cttz",
+            _ => unreachable!(),
+        };
+        let int_size = in_elem.int_size_and_signed(bx.tcx()).0.bits();
+        let llvm_intrinsic = &format!("llvm.{}.v{}i{}", intrinsic_name, in_len, int_size,);
+
+        return if name == sym::simd_bswap && int_size == 8 {
+            // byte swap is no-op for i8/u8
+            Ok(args[0].immediate())
+        } else if matches!(name, sym::simd_ctlz | sym::simd_cttz) {
+            let fn_ty = bx.type_func(&[vec_ty, bx.type_i1()], vec_ty);
+            let f = bx.declare_cfn(llvm_intrinsic, llvm::UnnamedAddr::No, fn_ty);
+            Ok(bx.call(
+                fn_ty,
+                None,
+                None,
+                f,
+                &[args[0].immediate(), bx.const_int(bx.type_i1(), 0)],
+                None,
+            ))
+        } else {
+            let fn_ty = bx.type_func(&[vec_ty], vec_ty);
+            let f = bx.declare_cfn(llvm_intrinsic, llvm::UnnamedAddr::No, fn_ty);
+            Ok(bx.call(fn_ty, None, None, f, &[args[0].immediate()], None))
+        };
     }
 
     if name == sym::simd_arith_offset {

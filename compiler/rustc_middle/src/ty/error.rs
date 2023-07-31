@@ -90,9 +90,9 @@ impl<'tcx> TypeError<'tcx> {
             // A naive approach to making sure that we're not reporting silly errors such as:
             // (expected closure, found closure).
             if expected == found {
-                format!("expected {}, found a different {}", expected, found)
+                format!("expected {expected}, found a different {found}")
             } else {
-                format!("expected {}, found {}", expected, found)
+                format!("expected {expected}, found {found}")
             }
         }
 
@@ -131,7 +131,7 @@ impl<'tcx> TypeError<'tcx> {
             )
             .into(),
             ArgCount => "incorrect number of function parameters".into(),
-            FieldMisMatch(adt, field) => format!("field type mismatch: {}.{}", adt, field).into(),
+            FieldMisMatch(adt, field) => format!("field type mismatch: {adt}.{field}").into(),
             RegionsDoesNotOutlive(..) => "lifetime mismatch".into(),
             // Actually naming the region here is a bit confusing because context is lacking
             RegionsInsufficientlyPolymorphic(..) => {
@@ -164,7 +164,7 @@ impl<'tcx> TypeError<'tcx> {
                     ty::IntVarValue::IntType(ty) => ty.name_str(),
                     ty::IntVarValue::UintType(ty) => ty.name_str(),
                 };
-                format!("expected `{}`, found `{}`", expected, found).into()
+                format!("expected `{expected}`, found `{found}`").into()
             }
             FloatMismatch(ref values) => format!(
                 "expected `{}`, found `{}`",
@@ -339,12 +339,17 @@ impl<'tcx> TyCtxt<'tcx> {
     }
 
     pub fn short_ty_string(self, ty: Ty<'tcx>) -> (String, Option<PathBuf>) {
-        let width = self.sess.diagnostic_width();
-        let length_limit = width.saturating_sub(30);
         let regular = FmtPrinter::new(self, hir::def::Namespace::TypeNS)
             .pretty_print_type(ty)
             .expect("could not write to `String`")
             .into_buffer();
+
+        if !self.sess.opts.unstable_opts.write_long_types_to_disk {
+            return (regular, None);
+        }
+
+        let width = self.sess.diagnostic_width();
+        let length_limit = width.saturating_sub(30);
         if regular.len() <= width {
             return (regular, None);
         }

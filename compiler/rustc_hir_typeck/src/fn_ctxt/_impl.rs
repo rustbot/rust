@@ -61,7 +61,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
                 debug!("warn_if_unreachable: id={:?} span={:?} kind={}", id, span, kind);
 
-                let msg = format!("unreachable {}", kind);
+                let msg = format!("unreachable {kind}");
                 self.tcx().struct_span_lint_hir(
                     lint::builtin::UNREACHABLE_CODE,
                     id,
@@ -134,7 +134,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     }
 
     pub fn tag(&self) -> String {
-        format!("{:p}", self)
+        format!("{self:p}")
     }
 
     pub fn local_ty(&self, span: Span, nid: hir::HirId) -> Ty<'tcx> {
@@ -860,7 +860,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             .resolve_fully_qualified_call(span, item_name, ty.normalized, qself.span, hir_id)
             .and_then(|r| {
                 // lint bare trait if the method is found in the trait
-                if span.edition().rust_2021() && let Some(mut diag) = self.tcx.sess.diagnostic().steal_diagnostic(qself.span, StashKey::TraitMissingMethod) {
+                if span.edition().at_least_rust_2021() && let Some(mut diag) = self.tcx.sess.diagnostic().steal_diagnostic(qself.span, StashKey::TraitMissingMethod) {
                     diag.emit();
                 }
                 Ok(r)
@@ -890,7 +890,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 }
 
                 // emit or cancel the diagnostic for bare traits
-                if span.edition().rust_2021() && let Some(mut diag) = self.tcx.sess.diagnostic().steal_diagnostic(qself.span, StashKey::TraitMissingMethod) {
+                if span.edition().at_least_rust_2021() && let Some(mut diag) = self.tcx.sess.diagnostic().steal_diagnostic(qself.span, StashKey::TraitMissingMethod) {
                     if trait_missing_method {
                         // cancel the diag for bare traits when meeting `MyTrait::missing_method`
                         diag.cancel();
@@ -908,7 +908,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         error,
                         None,
                         Expectation::NoExpectation,
-                        trait_missing_method && span.edition().rust_2021(), // emits missing method for trait only after edition 2021
+                        trait_missing_method && span.edition().at_least_rust_2021(), // emits missing method for trait only after edition 2021
                     ) {
                         e.emit();
                     }
@@ -1069,7 +1069,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         } else if let ExprKind::MethodCall(..) = rcvr.kind {
             err.span_note(
                 sp,
-                modifies_rcvr_note.clone() + ", it is not meant to be used in method chains.",
+                modifies_rcvr_note + ", it is not meant to be used in method chains.",
             );
         } else {
             err.span_note(sp, modifies_rcvr_note);
@@ -1412,9 +1412,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     self.tcx.sess.delay_span_bug(
                         span,
                         format!(
-                        "instantiate_value_path: (UFCS) {:?} was a subtype of {:?} but now is not?",
-                        self_ty,
-                        impl_ty,
+                        "instantiate_value_path: (UFCS) {self_ty:?} was a subtype of {impl_ty:?} but now is not?",
                     ),
                     );
                 }

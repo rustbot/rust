@@ -16,7 +16,7 @@ use crate::cache::{Interned, INTERNER};
 use crate::compile;
 use crate::config::{Config, TargetSelection};
 use crate::tool::{self, prepare_tool_cargo, SourceType, Tool};
-use crate::util::{symlink_dir, t, up_to_date};
+use crate::util::{dir_is_empty, symlink_dir, t, up_to_date};
 use crate::Mode;
 
 macro_rules! submodule_helper {
@@ -147,7 +147,7 @@ impl<P: Step> Step for RustbookSrc<P> {
 
         if !builder.config.dry_run() && !(up_to_date(&src, &index) || up_to_date(&rustbook, &index))
         {
-            builder.info(&format!("Rustbook ({}) - {}", target, name));
+            builder.info(&format!("Rustbook ({target}) - {name}"));
             let _ = fs::remove_dir_all(&out);
 
             builder.run(rustbook_cmd.arg("build").arg(&src).arg("-d").arg(out));
@@ -197,11 +197,21 @@ impl Step for TheBook {
         let compiler = self.compiler;
         let target = self.target;
 
+        let absolute_path = builder.src.join(&relative_path);
+        let redirect_path = absolute_path.join("redirects");
+        if !absolute_path.exists()
+            || !redirect_path.exists()
+            || dir_is_empty(&absolute_path)
+            || dir_is_empty(&redirect_path)
+        {
+            eprintln!("Please checkout submodule: {}", relative_path.display());
+            crate::exit!(1);
+        }
         // build book
         builder.ensure(RustbookSrc {
             target,
             name: INTERNER.intern_str("book"),
-            src: INTERNER.intern_path(builder.src.join(&relative_path)),
+            src: INTERNER.intern_path(absolute_path.clone()),
             parent: Some(self),
         });
 
@@ -209,8 +219,8 @@ impl Step for TheBook {
         for edition in &["first-edition", "second-edition", "2018-edition"] {
             builder.ensure(RustbookSrc {
                 target,
-                name: INTERNER.intern_string(format!("book/{}", edition)),
-                src: INTERNER.intern_path(builder.src.join(&relative_path).join(edition)),
+                name: INTERNER.intern_string(format!("book/{edition}")),
+                src: INTERNER.intern_path(absolute_path.join(edition)),
                 // There should only be one book that is marked as the parent for each target, so
                 // treat the other editions as not having a parent.
                 parent: Option::<Self>::None,
@@ -225,7 +235,7 @@ impl Step for TheBook {
 
         // build the redirect pages
         let _guard = builder.msg_doc(compiler, "book redirect pages", target);
-        for file in t!(fs::read_dir(builder.src.join(&relative_path).join("redirects"))) {
+        for file in t!(fs::read_dir(redirect_path)) {
             let file = t!(file);
             let path = file.path();
             let path = path.to_str().unwrap();
@@ -884,19 +894,10 @@ tool_doc!(
         "-p",
         "cargo-credential",
         "-p",
-        "cargo-credential-1password",
-        "-p",
         "mdman",
         // FIXME: this trips a license check in tidy.
         // "-p",
         // "resolver-tests",
-        // FIXME: we should probably document these, but they're different per-platform so we can't use `tool_doc`.
-        // "-p",
-        // "cargo-credential-gnome-secret",
-        // "-p",
-        // "cargo-credential-macos-keychain",
-        // "-p",
-        // "cargo-credential-wincred",
     ]
 );
 tool_doc!(Tidy, "tidy", "src/tools/tidy", rustc_tool = false, ["-p", "tidy"]);
@@ -965,7 +966,7 @@ impl Step for UnstableBookGen {
     fn run(self, builder: &Builder<'_>) {
         let target = self.target;
 
-        builder.info(&format!("Generating unstable book md files ({})", target));
+        builder.info(&format!("Generating unstable book md files ({target})"));
         let out = builder.md_doc_out(target).join("unstable-book");
         builder.create_dir(&out);
         builder.remove_dir(&out);

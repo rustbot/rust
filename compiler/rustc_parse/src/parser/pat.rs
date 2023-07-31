@@ -8,7 +8,6 @@ use crate::errors::{
     TrailingVertNotAllowed, UnexpectedLifetimeInPattern, UnexpectedVertVertBeforeFunctionParam,
     UnexpectedVertVertInPattern,
 };
-use crate::fluent_generated as fluent;
 use crate::{maybe_recover_from_interpolated_ty_qpath, maybe_whole};
 use rustc_ast::mut_visit::{noop_visit_pat, MutVisitor};
 use rustc_ast::ptr::P;
@@ -214,41 +213,25 @@ impl<'a> Parser<'a> {
 
         if let PatKind::Or(pats) = &pat.kind {
             let span = pat.span;
-
-            if trailing_vert {
-                // We already emitted an error and suggestion to remove the trailing vert. Don't
-                // emit again.
-
-                // FIXME(#100717): pass `TopLevelOrPatternNotAllowed::* { sub: None }` to
-                // `delay_span_bug()` instead of fluent message
-                self.sess.span_diagnostic.delay_span_bug(
-                    span,
-                    match syntax_loc {
-                        PatternLocation::LetBinding => {
-                            fluent::parse_or_pattern_not_allowed_in_let_binding
-                        }
-                        PatternLocation::FunctionParameter => {
-                            fluent::parse_or_pattern_not_allowed_in_fn_parameters
-                        }
-                    },
-                );
+            let pat = pprust::pat_to_string(&pat);
+            let sub = if pats.len() == 1 {
+                Some(TopLevelOrPatternNotAllowedSugg::RemoveLeadingVert { span, pat })
             } else {
-                let pat = pprust::pat_to_string(&pat);
-                let sub = if pats.len() == 1 {
-                    Some(TopLevelOrPatternNotAllowedSugg::RemoveLeadingVert { span, pat })
-                } else {
-                    Some(TopLevelOrPatternNotAllowedSugg::WrapInParens { span, pat })
-                };
+                Some(TopLevelOrPatternNotAllowedSugg::WrapInParens { span, pat })
+            };
 
-                self.sess.emit_err(match syntax_loc {
-                    PatternLocation::LetBinding => {
-                        TopLevelOrPatternNotAllowed::LetBinding { span, sub }
-                    }
-                    PatternLocation::FunctionParameter => {
-                        TopLevelOrPatternNotAllowed::FunctionParameter { span, sub }
-                    }
-                });
+            let mut err = self.sess.create_err(match syntax_loc {
+                PatternLocation::LetBinding => {
+                    TopLevelOrPatternNotAllowed::LetBinding { span, sub }
+                }
+                PatternLocation::FunctionParameter => {
+                    TopLevelOrPatternNotAllowed::FunctionParameter { span, sub }
+                }
+            });
+            if trailing_vert {
+                err.delay_as_bug();
             }
+            err.emit();
         }
 
         Ok((pat, colon))
@@ -445,7 +428,7 @@ impl<'a> Parser<'a> {
                     );
 
                     let mut err = self_.struct_span_err(self_.token.span, msg);
-                    err.span_label(self_.token.span, format!("expected {}", expected));
+                    err.span_label(self_.token.span, format!("expected {expected}"));
                     err
                 });
             PatKind::Lit(self.mk_expr(lo, ExprKind::Lit(lit)))
@@ -681,7 +664,7 @@ impl<'a> Parser<'a> {
         let msg = format!("expected {}, found {}", expected, super::token_descr(&self.token));
 
         let mut err = self.struct_span_err(self.token.span, msg);
-        err.span_label(self.token.span, format!("expected {}", expected));
+        err.span_label(self.token.span, format!("expected {expected}"));
 
         let sp = self.sess.source_map().start_point(self.token.span);
         if let Some(sp) = self.sess.ambiguous_block_expr_parse.borrow().get(&sp) {
@@ -994,7 +977,7 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 let token_str = super::token_descr(&self.token);
-                let msg = format!("expected `}}`, found {}", token_str);
+                let msg = format!("expected `}}`, found {token_str}");
                 let mut err = self.struct_span_err(self.token.span, msg);
 
                 err.span_label(self.token.span, "expected `}`");

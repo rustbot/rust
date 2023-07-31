@@ -824,9 +824,9 @@ pub(crate) enum ItemKind {
     ProcMacroItem(ProcMacro),
     PrimitiveItem(PrimitiveType),
     /// A required associated constant in a trait declaration.
-    TyAssocConstItem(Type),
+    TyAssocConstItem(Box<Generics>, Type),
     /// An associated constant in a trait impl or a provided one in a trait declaration.
-    AssocConstItem(Type, ConstantKind),
+    AssocConstItem(Box<Generics>, Type, ConstantKind),
     /// A required associated type in a trait declaration.
     ///
     /// The bounds may be non-empty if there is a `where` clause.
@@ -871,8 +871,8 @@ impl ItemKind {
             | MacroItem(_)
             | ProcMacroItem(_)
             | PrimitiveItem(_)
-            | TyAssocConstItem(_)
-            | AssocConstItem(_, _)
+            | TyAssocConstItem(..)
+            | AssocConstItem(..)
             | TyAssocTypeItem(..)
             | AssocTypeItem(..)
             | StrippedItem(_)
@@ -1219,15 +1219,24 @@ pub(crate) enum GenericBound {
 }
 
 impl GenericBound {
+    pub(crate) fn sized(cx: &mut DocContext<'_>) -> GenericBound {
+        Self::sized_with(cx, hir::TraitBoundModifier::None)
+    }
+
     pub(crate) fn maybe_sized(cx: &mut DocContext<'_>) -> GenericBound {
+        Self::sized_with(cx, hir::TraitBoundModifier::Maybe)
+    }
+
+    fn sized_with(cx: &mut DocContext<'_>, modifier: hir::TraitBoundModifier) -> GenericBound {
         let did = cx.tcx.require_lang_item(LangItem::Sized, None);
         let empty = ty::Binder::dummy(ty::GenericArgs::empty());
         let path = external_path(cx, did, false, ThinVec::new(), empty);
         inline::record_extern_fqn(cx, did, ItemType::Trait);
-        GenericBound::TraitBound(
-            PolyTrait { trait_: path, generic_params: Vec::new() },
-            hir::TraitBoundModifier::Maybe,
-        )
+        GenericBound::TraitBound(PolyTrait { trait_: path, generic_params: Vec::new() }, modifier)
+    }
+
+    pub(crate) fn is_trait_bound(&self) -> bool {
+        matches!(self, Self::TraitBound(..))
     }
 
     pub(crate) fn is_sized_bound(&self, cx: &DocContext<'_>) -> bool {
@@ -1269,7 +1278,7 @@ impl Lifetime {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum WherePredicate {
     BoundPredicate { ty: Type, bounds: Vec<GenericBound>, bound_params: Vec<GenericParamDef> },
     RegionPredicate { lifetime: Lifetime, bounds: Vec<GenericBound> },
@@ -1339,7 +1348,7 @@ impl GenericParamDef {
 }
 
 // maybe use a Generic enum and use Vec<Generic>?
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
 pub(crate) struct Generics {
     pub(crate) params: ThinVec<GenericParamDef>,
     pub(crate) where_predicates: ThinVec<WherePredicate>,
@@ -1776,7 +1785,6 @@ impl PrimitiveType {
     }
 
     pub(crate) fn simplified_types() -> &'static SimplifiedTypes {
-        use ty::fast_reject::SimplifiedType::*;
         use ty::{FloatTy, IntTy, UintTy};
         use PrimitiveType::*;
         static CELL: OnceCell<SimplifiedTypes> = OnceCell::new();
@@ -1784,38 +1792,38 @@ impl PrimitiveType {
         let single = |x| iter::once(x).collect();
         CELL.get_or_init(move || {
             map! {
-                Isize => single(IntSimplifiedType(IntTy::Isize)),
-                I8 => single(IntSimplifiedType(IntTy::I8)),
-                I16 => single(IntSimplifiedType(IntTy::I16)),
-                I32 => single(IntSimplifiedType(IntTy::I32)),
-                I64 => single(IntSimplifiedType(IntTy::I64)),
-                I128 => single(IntSimplifiedType(IntTy::I128)),
-                Usize => single(UintSimplifiedType(UintTy::Usize)),
-                U8 => single(UintSimplifiedType(UintTy::U8)),
-                U16 => single(UintSimplifiedType(UintTy::U16)),
-                U32 => single(UintSimplifiedType(UintTy::U32)),
-                U64 => single(UintSimplifiedType(UintTy::U64)),
-                U128 => single(UintSimplifiedType(UintTy::U128)),
-                F32 => single(FloatSimplifiedType(FloatTy::F32)),
-                F64 => single(FloatSimplifiedType(FloatTy::F64)),
-                Str => single(StrSimplifiedType),
-                Bool => single(BoolSimplifiedType),
-                Char => single(CharSimplifiedType),
-                Array => single(ArraySimplifiedType),
-                Slice => single(SliceSimplifiedType),
+                Isize => single(SimplifiedType::Int(IntTy::Isize)),
+                I8 => single(SimplifiedType::Int(IntTy::I8)),
+                I16 => single(SimplifiedType::Int(IntTy::I16)),
+                I32 => single(SimplifiedType::Int(IntTy::I32)),
+                I64 => single(SimplifiedType::Int(IntTy::I64)),
+                I128 => single(SimplifiedType::Int(IntTy::I128)),
+                Usize => single(SimplifiedType::Uint(UintTy::Usize)),
+                U8 => single(SimplifiedType::Uint(UintTy::U8)),
+                U16 => single(SimplifiedType::Uint(UintTy::U16)),
+                U32 => single(SimplifiedType::Uint(UintTy::U32)),
+                U64 => single(SimplifiedType::Uint(UintTy::U64)),
+                U128 => single(SimplifiedType::Uint(UintTy::U128)),
+                F32 => single(SimplifiedType::Float(FloatTy::F32)),
+                F64 => single(SimplifiedType::Float(FloatTy::F64)),
+                Str => single(SimplifiedType::Str),
+                Bool => single(SimplifiedType::Bool),
+                Char => single(SimplifiedType::Char),
+                Array => single(SimplifiedType::Array),
+                Slice => single(SimplifiedType::Slice),
                 // FIXME: If we ever add an inherent impl for tuples
                 // with different lengths, they won't show in rustdoc.
                 //
                 // Either manually update this arrayvec at this point
                 // or start with a more complex refactoring.
-                Tuple => [TupleSimplifiedType(1), TupleSimplifiedType(2), TupleSimplifiedType(3)].into(),
-                Unit => single(TupleSimplifiedType(0)),
-                RawPointer => [PtrSimplifiedType(Mutability::Not), PtrSimplifiedType(Mutability::Mut)].into_iter().collect(),
-                Reference => [RefSimplifiedType(Mutability::Not), RefSimplifiedType(Mutability::Mut)].into_iter().collect(),
+                Tuple => [SimplifiedType::Tuple(1), SimplifiedType::Tuple(2), SimplifiedType::Tuple(3)].into(),
+                Unit => single(SimplifiedType::Tuple(0)),
+                RawPointer => [SimplifiedType::Ptr(Mutability::Not), SimplifiedType::Ptr(Mutability::Mut)].into_iter().collect(),
+                Reference => [SimplifiedType::Ref(Mutability::Not), SimplifiedType::Ref(Mutability::Mut)].into_iter().collect(),
                 // FIXME: This will be wrong if we ever add inherent impls
                 // for function pointers.
-                Fn => single(FunctionSimplifiedType(1)),
-                Never => single(NeverSimplifiedType),
+                Fn => single(SimplifiedType::Function(1)),
+                Never => single(SimplifiedType::Never),
             }
         })
     }
@@ -2204,6 +2212,17 @@ pub(crate) enum GenericArgs {
     Parenthesized { inputs: Box<[Type]>, output: Option<Box<Type>> },
 }
 
+impl GenericArgs {
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            GenericArgs::AngleBracketed { args, bindings } => {
+                args.is_empty() && bindings.is_empty()
+            }
+            GenericArgs::Parenthesized { inputs, output } => inputs.is_empty() && output.is_none(),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub(crate) struct PathSegment {
     pub(crate) name: Symbol,
@@ -2247,6 +2266,7 @@ pub(crate) struct Static {
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Constant {
     pub(crate) type_: Type,
+    pub(crate) generics: Box<Generics>,
     pub(crate) kind: ConstantKind,
 }
 
@@ -2496,7 +2516,8 @@ mod size_asserts {
     static_assert_size!(GenericParamDef, 56);
     static_assert_size!(Generics, 16);
     static_assert_size!(Item, 56);
-    static_assert_size!(ItemKind, 64);
+    // FIXME(generic_const_items): Further reduce the size.
+    static_assert_size!(ItemKind, 72);
     static_assert_size!(PathSegment, 40);
     static_assert_size!(Type, 32);
     // tidy-alphabetical-end

@@ -885,6 +885,13 @@ rustc_queries! {
         desc { |tcx| "computing the implied bounds of `{}`", tcx.def_path_str(key) }
     }
 
+    /// We need to store the assumed_wf_types for an RPITIT so that impls of foreign
+    /// traits with return-position impl trait in traits can inherit the right wf types.
+    query assumed_wf_types_for_rpitit(key: DefId) -> &'tcx [(Ty<'tcx>, Span)] {
+        desc { |tcx| "computing the implied bounds of `{}`", tcx.def_path_str(key) }
+        separate_provide_extern
+    }
+
     /// Computes the signature of the function.
     query fn_sig(key: DefId) -> ty::EarlyBinder<ty::PolyFnSig<'tcx>> {
         desc { |tcx| "computing function signature of `{}`", tcx.def_path_str(key) }
@@ -896,6 +903,10 @@ rustc_queries! {
     /// Performs lint checking for the module.
     query lint_mod(key: LocalDefId) -> () {
         desc { |tcx| "linting {}", describe_as_module(key, tcx) }
+    }
+
+    query check_unused_traits(_: ()) -> () {
+        desc { "checking unused trait imports in crate" }
     }
 
     /// Checks the attributes in the module.
@@ -1273,7 +1284,7 @@ rustc_queries! {
     query vtable_allocation(key: (Ty<'tcx>, Option<ty::PolyExistentialTraitRef<'tcx>>)) -> mir::interpret::AllocId {
         desc { |tcx| "vtable const allocation for <{} as {}>",
             key.0,
-            key.1.map(|trait_ref| format!("{}", trait_ref)).unwrap_or("_".to_owned())
+            key.1.map(|trait_ref| format!("{trait_ref}")).unwrap_or("_".to_owned())
         }
     }
 
@@ -1579,7 +1590,7 @@ rustc_queries! {
     }
 
     /// Returns a list of all `extern` blocks of a crate.
-    query foreign_modules(_: CrateNum) -> &'tcx FxHashMap<DefId, ForeignModule> {
+    query foreign_modules(_: CrateNum) -> &'tcx FxIndexMap<DefId, ForeignModule> {
         arena_cache
         desc { "looking up the foreign modules of a linked crate" }
         separate_provide_extern
@@ -2060,9 +2071,9 @@ rustc_queries! {
         }
     }
 
-    query is_impossible_method(key: (DefId, DefId)) -> bool {
+    query is_impossible_associated_item(key: (DefId, DefId)) -> bool {
         desc { |tcx|
-            "checking if `{}` is impossible to call within `{}`",
+            "checking if `{}` is impossible to reference within `{}`",
             tcx.def_path_str(key.1),
             tcx.def_path_str(key.0),
         }

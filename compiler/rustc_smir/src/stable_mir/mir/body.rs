@@ -1,4 +1,4 @@
-use crate::rustc_internal::Opaque;
+use crate::stable_mir::ty::Region;
 use crate::stable_mir::{self, ty::Ty};
 
 #[derive(Clone, Debug)]
@@ -137,8 +137,6 @@ pub enum Statement {
     Nop,
 }
 
-type Region = Opaque;
-
 // FIXME this is incomplete
 #[derive(Clone, Debug)]
 pub enum Rvalue {
@@ -219,6 +217,9 @@ pub enum Rvalue {
     /// **Needs clarification**: Are there weird additional semantics here related to the runtime
     /// nature of this operation?
     ThreadLocalRef(stable_mir::CrateItem),
+
+    /// Computes a value as described by the operation.
+    NullaryOp(NullOp, Ty),
 
     /// Exactly like `BinaryOp`, but less operands.
     ///

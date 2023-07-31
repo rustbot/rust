@@ -165,6 +165,7 @@
 #![feature(duration_consts_float)]
 #![feature(internal_impls_macro)]
 #![feature(ip)]
+#![feature(ip_bits)]
 #![feature(is_ascii_octdigit)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(ptr_alignment_type)]
@@ -398,7 +399,8 @@ pub mod primitive;
     missing_debug_implementations,
     dead_code,
     unused_imports,
-    unsafe_op_in_unsafe_fn
+    unsafe_op_in_unsafe_fn,
+    ambiguous_glob_reexports
 )]
 #[allow(rustdoc::bare_urls)]
 // FIXME: This annotation should be moved into rust-lang/stdarch after clashing_extern_declarations is
@@ -417,7 +419,7 @@ pub mod arch;
 // set up in such a way that directly pulling it here works such that the
 // crate uses this crate as its core.
 #[path = "../../portable-simd/crates/core_simd/src/mod.rs"]
-#[allow(missing_debug_implementations, dead_code, unsafe_op_in_unsafe_fn, unused_unsafe)]
+#[allow(missing_debug_implementations, dead_code, unsafe_op_in_unsafe_fn)]
 #[allow(rustdoc::bare_urls)]
 #[unstable(feature = "portable_simd", issue = "86656")]
 mod core_simd;

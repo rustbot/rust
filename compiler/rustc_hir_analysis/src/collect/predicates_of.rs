@@ -66,7 +66,7 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Gen
             let opaque_ty_id = tcx.hir().local_def_id_to_hir_id(opaque_def_id.expect_local());
             let opaque_ty_node = tcx.hir().get(opaque_ty_id);
             let Node::Item(&Item {
-                kind: ItemKind::OpaqueTy(OpaqueTy { lifetime_mapping, .. }),
+                kind: ItemKind::OpaqueTy(OpaqueTy { lifetime_mapping: Some(lifetime_mapping), .. }),
                 ..
             }) = opaque_ty_node
             else {
@@ -156,6 +156,7 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Gen
             }
             ItemKind::Fn(.., generics, _)
             | ItemKind::TyAlias(_, generics)
+            | ItemKind::Const(_, generics, _)
             | ItemKind::Enum(_, generics)
             | ItemKind::Struct(_, generics)
             | ItemKind::Union(_, generics) => generics,
@@ -762,6 +763,7 @@ pub(super) fn type_param_predicates(
                 ItemKind::Fn(.., generics, _)
                 | ItemKind::Impl(&hir::Impl { generics, .. })
                 | ItemKind::TyAlias(_, generics)
+                | ItemKind::Const(_, generics, _)
                 | ItemKind::OpaqueTy(&OpaqueTy {
                     generics,
                     origin: hir::OpaqueTyOrigin::TyAlias { .. },

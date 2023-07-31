@@ -50,7 +50,7 @@ impl<'tcx> TraitAliasExpansionInfo<'tcx> {
         diag.span_label(self.top().1, top_label);
         if self.path.len() > 1 {
             for (_, sp) in self.path.iter().rev().skip(1).take(self.path.len() - 2) {
-                diag.span_label(*sp, format!("referenced here ({})", use_desc));
+                diag.span_label(*sp, format!("referenced here ({use_desc})"));
             }
         }
         if self.top().1 != self.bottom().1 {
@@ -58,7 +58,7 @@ impl<'tcx> TraitAliasExpansionInfo<'tcx> {
             // redundant labels.
             diag.span_label(
                 self.bottom().1,
-                format!("trait alias used in trait object type ({})", use_desc),
+                format!("trait alias used in trait object type ({use_desc})"),
             );
         }
     }
@@ -241,9 +241,9 @@ pub fn upcast_choices<'tcx>(
 /// Given an upcast trait object described by `object`, returns the
 /// index of the method `method_def_id` (which should be part of
 /// `object.upcast_trait_ref`) within the vtable for `object`.
-pub fn get_vtable_index_of_object_method<'tcx, N>(
+pub fn get_vtable_index_of_object_method<'tcx>(
     tcx: TyCtxt<'tcx>,
-    object: &super::ImplSourceObjectData<N>,
+    vtable_base: usize,
     method_def_id: DefId,
 ) -> Option<usize> {
     // Count number of methods preceding the one we are selecting and
@@ -252,7 +252,7 @@ pub fn get_vtable_index_of_object_method<'tcx, N>(
         .iter()
         .copied()
         .position(|def_id| def_id == method_def_id)
-        .map(|index| object.vtable_base + index)
+        .map(|index| vtable_base + index)
 }
 
 pub fn closure_trait_ref_and_return_type<'tcx>(

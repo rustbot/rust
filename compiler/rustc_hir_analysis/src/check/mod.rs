@@ -214,7 +214,7 @@ fn missing_items_err(
             trait_item,
             tcx.impl_trait_ref(impl_def_id).unwrap().instantiate_identity(),
         );
-        let code = format!("{}{}\n{}", padding, snippet, padding);
+        let code = format!("{padding}{snippet}\n{padding}");
         if let Some(span) = tcx.hir().span_if_local(trait_item.def_id) {
             missing_trait_item_label
                 .push(errors::MissingTraitItemLabel { span, item: trait_item.name });
@@ -409,7 +409,7 @@ fn fn_sig_suggestion<'tcx>(
     let asyncness = if tcx.asyncness(assoc.def_id).is_async() {
         output = if let ty::Alias(_, alias_ty) = *output.kind() {
             tcx.explicit_item_bounds(alias_ty.def_id)
-                .arg_iter_copied(tcx, alias_ty.args)
+                .iter_instantiated_copied(tcx, alias_ty.args)
                 .find_map(|(bound, _)| bound.as_projection_clause()?.no_bound_vars()?.term.ty())
                 .unwrap_or_else(|| {
                     span_bug!(

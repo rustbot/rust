@@ -51,7 +51,7 @@ mod encoder;
 mod table;
 
 pub(crate) fn rustc_version(cfg_version: &'static str) -> String {
-    format!("rustc {}", cfg_version)
+    format!("rustc {cfg_version}")
 }
 
 /// Metadata encoding version.
@@ -65,6 +65,12 @@ const METADATA_VERSION: u8 = 8;
 /// the position of the `CrateRoot`, which is encoded as a 32-bit big-endian
 /// unsigned integer, and further followed by the rustc version string.
 pub const METADATA_HEADER: &[u8] = &[b'r', b'u', b's', b't', 0, 0, 0, METADATA_VERSION];
+
+#[derive(Encodable, Decodable)]
+enum SpanEncodingMode {
+    Shorthand(usize),
+    Direct,
+}
 
 /// A value of type T referred to by its absolute position
 /// in the metadata, and which can be decoded lazily.
@@ -451,6 +457,7 @@ define_tables! {
     trait_impl_trait_tys: Table<DefIndex, LazyValue<FxHashMap<DefId, ty::EarlyBinder<Ty<'static>>>>>,
     doc_link_resolutions: Table<DefIndex, LazyValue<DocLinkResMap>>,
     doc_link_traits_in_scope: Table<DefIndex, LazyArray<DefId>>,
+    assumed_wf_types_for_rpitit: Table<DefIndex, LazyArray<(Ty<'static>, Span)>>,
 }
 
 #[derive(TyEncodable, TyDecodable)]

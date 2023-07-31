@@ -23,6 +23,8 @@ use rustc_span::symbol::Symbol;
 use rustc_target::abi::call::FnAbi;
 use rustc_target::spec::Target;
 
+use std::fmt;
+
 pub trait BackendTypes {
     type Value: CodegenObject;
     type Function: CodegenObject;
@@ -61,7 +63,7 @@ pub trait CodegenBackend {
     fn locale_resource(&self) -> &'static str;
 
     fn init(&self, _sess: &Session) {}
-    fn print(&self, _req: PrintRequest, _sess: &Session) {}
+    fn print(&self, _req: &PrintRequest, _out: &mut dyn PrintBackendInfo, _sess: &Session) {}
     fn target_features(&self, _sess: &Session, _allow_unstable: bool) -> Vec<Symbol> {
         vec![]
     }
@@ -140,15 +142,6 @@ pub trait ExtraBackendMethods:
         target_features: &[String],
     ) -> TargetMachineFactoryFn<Self>;
 
-    fn spawn_thread<F, T>(_time_trace: bool, f: F) -> std::thread::JoinHandle<T>
-    where
-        F: FnOnce() -> T,
-        F: Send + 'static,
-        T: Send + 'static,
-    {
-        std::thread::spawn(f)
-    }
-
     fn spawn_named_thread<F, T>(
         _time_trace: bool,
         name: String,
@@ -160,5 +153,21 @@ pub trait ExtraBackendMethods:
         T: Send + 'static,
     {
         std::thread::Builder::new().name(name).spawn(f)
+    }
+}
+
+pub trait PrintBackendInfo {
+    fn infallible_write_fmt(&mut self, args: fmt::Arguments<'_>);
+}
+
+impl PrintBackendInfo for String {
+    fn infallible_write_fmt(&mut self, args: fmt::Arguments<'_>) {
+        fmt::Write::write_fmt(self, args).unwrap();
+    }
+}
+
+impl dyn PrintBackendInfo + '_ {
+    pub fn write_fmt(&mut self, args: fmt::Arguments<'_>) {
+        self.infallible_write_fmt(args);
     }
 }

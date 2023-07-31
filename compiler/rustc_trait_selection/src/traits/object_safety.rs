@@ -517,8 +517,7 @@ fn virtual_call_violation_for_method<'tcx>(
                     tcx.sess.delay_span_bug(
                         tcx.def_span(method.def_id),
                         format!(
-                            "receiver when `Self = ()` should have a Scalar ABI; found {:?}",
-                            abi
+                            "receiver when `Self = ()` should have a Scalar ABI; found {abi:?}"
                         ),
                     );
                 }
@@ -536,8 +535,7 @@ fn virtual_call_violation_for_method<'tcx>(
                     tcx.sess.delay_span_bug(
                         tcx.def_span(method.def_id),
                         format!(
-                            "receiver when `Self = {}` should have a ScalarPair ABI; found {:?}",
-                            trait_object_ty, abi
+                            "receiver when `Self = {trait_object_ty}` should have a ScalarPair ABI; found {abi:?}"
                         ),
                     );
                 }
@@ -761,11 +759,7 @@ fn receiver_is_dispatchable<'tcx>(
         let caller_bounds =
             param_env.caller_bounds().iter().chain([unsize_predicate, trait_predicate]);
 
-        ty::ParamEnv::new(
-            tcx.mk_clauses_from_iter(caller_bounds),
-            param_env.reveal(),
-            param_env.constness(),
-        )
+        ty::ParamEnv::new(tcx.mk_clauses_from_iter(caller_bounds), param_env.reveal())
     };
 
     // Receiver: DispatchFromDyn<Receiver[Self => U]>

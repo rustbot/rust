@@ -212,7 +212,7 @@ impl<'tcx> Const<'tcx> {
                 Err(e) => {
                     tcx.sess.delay_span_bug(
                         expr.span,
-                        format!("Const::from_anon_const: couldn't lit_to_const {:?}", e),
+                        format!("Const::from_anon_const: couldn't lit_to_const {e:?}"),
                     );
                 }
             }
@@ -267,7 +267,7 @@ impl<'tcx> Const<'tcx> {
     pub fn from_bits(tcx: TyCtxt<'tcx>, bits: u128, ty: ParamEnvAnd<'tcx, Ty<'tcx>>) -> Self {
         let size = tcx
             .layout_of(ty)
-            .unwrap_or_else(|e| panic!("could not compute layout for {:?}: {:?}", ty, e))
+            .unwrap_or_else(|e| panic!("could not compute layout for {ty:?}: {e:?}"))
             .size;
         ty::Const::new_value(
             tcx,
@@ -292,6 +292,14 @@ impl<'tcx> Const<'tcx> {
     /// Creates an interned usize constant.
     pub fn from_target_usize(tcx: TyCtxt<'tcx>, n: u64) -> Self {
         Self::from_bits(tcx, n as u128, ParamEnv::empty().and(tcx.types.usize))
+    }
+
+    /// Attempts to convert to a `ValTree`
+    pub fn try_to_valtree(self) -> Option<ty::ValTree<'tcx>> {
+        match self.kind() {
+            ty::ConstKind::Value(valtree) => Some(valtree),
+            _ => None,
+        }
     }
 
     #[inline]
